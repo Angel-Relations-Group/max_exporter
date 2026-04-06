@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MAX Export</title>
+<style>
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:12px;min-width:320px}
+.row{margin:10px 0}
+label{display:block;font-weight:600;margin-bottom:6px}
+input,select{width:100%;padding:8px;font-size:13px;box-sizing:border-box}
+button{width:100%;padding:10px;font-size:13px;cursor:pointer;margin-top:8px}
+.hint{color:#555;font-size:12px;line-height:1.35}
+.status{margin-top:8px;font-size:12px;white-space:pre-wrap}
+</style>
+</head>
+<body>
+  <div class="row">
+    <div class="hint">Откройте публичный канал или чат MAX на активной вкладке, затем нажмите «Экспорт».</div>
+  </div>
+  <div class="row">
+    <label>Шаги прокрутки</label>
+    <input id="maxScrolls" type="number" min="5" max="5000" value="120" />
+  </div>
+  <div class="row">
+    <label>Начальная дата (необязательно)</label>
+    <input id="startDate" type="date" />
+    <div class="hint">Если указана - экспорт начнётся с этой даты</div>
+  </div>
+  <div class="row">
+    <label>Конечная дата (необязательно)</label>
+    <input id="endDate" type="date" />
+    <div class="hint">Если указана - экспорт закончится этой датой</div>
+  </div>
+  <div class="row">
+    <label>Пауза между прокрутками (мс)</label>
+    <input id="delayMs" type="number" min="50" max="5000" value="350" />
+  </div>
+  <div class="row">
+    <label>Формат</label>
+    <select id="format">
+      <option value="csv">CSV для Excel</option>
+      <option value="json">JSON</option>
+    </select>
+  </div>
+  <button id="run">Экспорт</button>
+  <button id="stop" style="display:none;">Стоп</button>
+  <div id="status" class="status"></div>
+<script src="popup.js"></script>
+</body>
+</html>

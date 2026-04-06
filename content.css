@@ -1,0 +1,25 @@
+
+#max-exporter-panel{
+  position:fixed;
+  right:16px;
+  bottom:16px;
+  z-index:2147483647;
+  background:rgba(20,20,20,0.92);
+  color:#fff;
+  padding:10px 12px;
+  border-radius:14px;
+  box-shadow:0 10px 30px rgba(0,0,0,0.25);
+  font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+  width:300px;
+}
+#max-exporter-panel button{
+  width:100%;
+  margin-top:8px;
+  padding:8px 10px;
+  border-radius:10px;
+  border:0;
+  cursor:pointer;
+  font-size:13px;
+}
+#max-exporter-panel .muted{color:rgba(255,255,255,0.75); font-size:12px; line-height:1.35}
+#max-exporter-panel .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; font-size:11px; white-space:pre-wrap}
