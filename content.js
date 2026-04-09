@@ -325,27 +325,23 @@ function extractPostFromNode(node){
     return null;
   }
   
-  // Извлекаем реакции: ищем любой div с class containing "reactions" и svelte-
-  const reactionsEl = node.querySelector('[class*="reactions svelte-"]');
+  // Извлекаем реакции: ищем все элементы счетчиков внутри элемента
   let reactions = null;
-  if(reactionsEl) {
-    // Суммируем все числа в блоке реакций
-    const buttons = reactionsEl.querySelectorAll('button, [role="button"]');
-    let total = 0;
-    let hasReactions = false;
-    buttons.forEach(b => {
-      const btnText = (b.textContent || '').replace(/\u00A0/g, ' ').trim();
-      const numMatch = btnText.match(/(\d[\d\s.,]*\d|\d+(?:[.,]\d+)?\s*[kкmм]?)\s*$/);
-      if(numMatch) {
-        const n = parseHumanNumber(numMatch[1]);
-        if(n !== null && Number.isFinite(n) && n >= 0) {
-          total += n;
-          hasReactions = true;
-        }
+  const counterElements = node.querySelectorAll('[class*="counter svelte-"]');
+  let total = 0;
+  let hasReactions = false;
+  counterElements.forEach(c => {
+    const counterText = (c.textContent || '').replace(/\u00A0/g, ' ').trim();
+    const numMatch = counterText.match(/^(\d+)$/);
+    if(numMatch) {
+      const n = parseInt(numMatch[1], 10);
+      if(Number.isFinite(n) && n >= 0) {
+        total += n;
+        hasReactions = true;
       }
-    });
-    if(hasReactions) reactions = total;
-  }
+    }
+  });
+  if(hasReactions) reactions = total;
   
   // Извлекаем просмотры и время из мета-блока
   // <span class="meta svelte-1htnb3l"><div class="meta meta--text svelte-13lobfv">...
