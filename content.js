@@ -296,20 +296,37 @@ function extractPostFromNode(node){
   // Извлекаем дату из капсулы
   const nodeDate = extractDateFromNode(node);
   
-  // Извлекаем текст сообщения: <span class="text svelte-1htnb3l">
-  const textEl = node.querySelector('span.text.svelte-1htnb3l');
+  // Извлекаем текст сообщения - ищем внутри bubble
+  // Структура: div.bubble > span.text или просто текст внутри bubble
   let text = '';
-  if(textEl) {
-    text = normalizeText(textEl.innerText);
-  } else {
-    // Фоллбек - весь текст элемента
-    text = normalizeText(node.innerText);
+  const bubble = node.querySelector('div.bubble.svelte-1htnb3l');
+  if(bubble) {
+    const textEl = bubble.querySelector('span.text.svelte-1htnb3l');
+    if(textEl) {
+      text = normalizeText(textEl.innerText);
+    } else {
+      // Фоллбек - текст напрямую внутри bubble (может быть с Svelte комментариями)
+      text = normalizeText(bubble.innerText);
+    }
   }
   
-  if(!looksLikePostText(text)) return null;
+  // Если не нашли в bubble, пробуем весь элемент
+  if(!text) {
+    const textEl = node.querySelector('span.text.svelte-1htnb3l');
+    if(textEl) {
+      text = normalizeText(textEl.innerText);
+    } else {
+      text = normalizeText(node.innerText);
+    }
+  }
   
-  // Извлекаем реакции: <div class="reactions reactions--inside svelte-1htnb3l">
-  const reactionsEl = node.querySelector('div.reactions.reactions--inside.svelte-1htnb3l');
+  if(!looksLikePostText(text)) {
+    console.log('MAX Export: Filtered text:', text.substring(0, 50));
+    return null;
+  }
+  
+  // Извлекаем реакции: ищем любой div с class containing "reactions" и svelte-
+  const reactionsEl = node.querySelector('[class*="reactions svelte-"]');
   let reactions = null;
   if(reactionsEl) {
     // Суммируем все числа в блоке реакций
@@ -337,9 +354,8 @@ function extractPostFromNode(node){
   let datetime = '';
   
   if(metaEl) {
-    // Ищем просмотры - ищем svg с #icon_eye_fill_mini
-    // Пример структуры: <span class="views svelte-13lobfv"><svg...><use href="#icon_eye_fill_mini"></use></svg> 16,3K</span>
-    const viewsSpan = metaEl.querySelector('span.views.svelte-13lobfv');
+    // Ищем просмотры - ищем любой span с class containing "views" и svelte-
+    const viewsSpan = metaEl.querySelector('[class*="views svelte-"]');
     if(viewsSpan) {
       // Извлекаем текст просмотров (например "16,3K" или "1.2M")
       const viewsText = viewsSpan.textContent || '';
@@ -450,10 +466,7 @@ function downloadViaBackground(blob, filename){
 function validateRequiredElements(){
   const requiredSelectors = [
     { selector: 'div.history.svelte-1prjz03', name: 'История сообщений (div.history.svelte-1prjz03)' },
-    { selector: 'div.item.svelte-rg2upy', name: 'Элемент сообщения (div.item.svelte-rg2upy)' },
-    { selector: 'span.capsule.svelte-3850xr', name: 'Капсула даты (span.capsule.svelte-3850xr)' },
-    { selector: 'span.text.svelte-1htnb3l', name: 'Текст сообщения (span.text.svelte-1htnb3l)' },
-    { selector: 'span.meta.svelte-1htnb3l', name: 'Мета-информация (span.meta.svelte-1htnb3l)' }
+    { selector: 'div.item.svelte-rg2upy', name: 'Элемент сообщения (div.item.svelte-rg2upy)' }
   ];
   
   const missing = [];
