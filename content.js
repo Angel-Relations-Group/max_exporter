@@ -422,11 +422,12 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
   const parsedStartDate = parseInputDate(startDate, true);
   const parsedEndDate = parseInputDate(endDate, false);
   
-  // Флаг: если указана startDate - мы в режиме экспорта по датам
-  const useDateRange = !!parsedStartDate;
+  // Флаг: режим фильтрации по датам (активен если указана хотя бы одна дата)
+  const useDateRange = !!parsedStartDate || !!parsedEndDate;
   
   // Флаг: начали ли мы сбор (после прокрутки к startDate)
-  let startedCollecting = !useDateRange;
+  // Если нет startDate - сразу начинаем сбор (режим только с endDate)
+  let startedCollecting = !parsedStartDate;
   
   // Элемент с капсулой начальной даты
   let startDateElement = null;
@@ -444,8 +445,8 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
     window.scrollTo(0, 0);
     await sleep(delayMs || 500);
     
-    // Если нужно найти начальную дату - ищем её
-    if(useDateRange && !startedCollecting){
+    // Если нужно найти начальную дату - ищем её (только если указан startDate)
+    if(useDateRange && !startedCollecting && parsedStartDate){
       const candidates = collectCandidates();
       let foundStartDate = false;
       let foundDateElement = null;
@@ -482,7 +483,7 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
     const allItems = collectCandidates();
     
     // Флаг: видели ли мы капсулу с начальной датой
-    let foundStartDateSeparator = !useDateRange; // Если режим без дат - сразу начинаем
+    let foundStartDateSeparator = !parsedStartDate; // Если нет startDate - сразу начинаем
     
     // Текущая дата (из последней найденной капсулы)
     let currentDate = null;
@@ -492,8 +493,8 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
       
       // Проверяем, есть ли в этом элементе капсула с датой
       const capsule = node.querySelector('span.capsule.svelte-3850xr');
-      if(capsule && useDateRange){
-        // Это капсула с датой - проверяем её значение
+      if(capsule && useDateRange && parsedStartDate){
+        // Это капсула с датой - проверяем её значение (только если есть startDate)
         const capsuleDate = extractDateFromNode(capsule.textContent);
         if(capsuleDate){
           const capsuleDateOnly = new Date(capsuleDate.getFullYear(), capsuleDate.getMonth(), capsuleDate.getDate());
@@ -514,8 +515,8 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
         // Если капсула есть, но не удалось распарсить дату - продолжаем обработку
       }
       
-      // Если капсулу начальной даты ещё не нашли - пропускаем всё до неё
-      if(useDateRange && !foundStartDateSeparator){
+      // Если startDate указан и капсулу начальной даты ещё не нашли - пропускаем всё до неё
+      if(parsedStartDate && !foundStartDateSeparator){
         continue;
       }
       
@@ -545,7 +546,7 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
         }
       }
       
-      // Дополнительная проверка: если у сообщения есть дата - проверяем что она больше или равна startDate
+      // Дополнительная проверка: если у сообщения есть дата и указан startDate - проверяем что она больше или равна startDate
       if(useDateRange && p.nodeDate && parsedStartDate){
         const msgDateOnly = new Date(p.nodeDate.getFullYear(), p.nodeDate.getMonth(), p.nodeDate.getDate());
         const startDateOnly = new Date(parsedStartDate.getFullYear(), parsedStartDate.getMonth(), parsedStartDate.getDate());
@@ -554,7 +555,7 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
         }
       }
       
-      // Проверяем дату сообщения для конечной даты
+      // Проверяем дату сообщения для конечной даты (endDate)
       if(useDateRange && p.nodeDate && parsedEndDate){
         const nodeDateOnly = new Date(p.nodeDate.getFullYear(), p.nodeDate.getMonth(), p.nodeDate.getDate());
         const endDateOnly = new Date(parsedEndDate.getFullYear(), parsedEndDate.getMonth(), parsedEndDate.getDate());
