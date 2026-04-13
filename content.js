@@ -397,6 +397,10 @@ function showElementValidationError(missingElements){
 }
 
 async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
+  // Всегда показываем панель при старте экспорта
+  const panel = ensurePanel();
+  panel.style.display = 'block';
+  
   // Проверяем наличие необходимых элементов на странице
   const missingElements = validateRequiredElements();
   if(missingElements.length > 0){
