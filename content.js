@@ -14,11 +14,11 @@ function ensurePanel(){
     <div class="muted">Экспорт сообщений: целевое количество + сортировка по времени.</div>
     <div id="max-exporter-progress" class="mono" style="margin-top:8px;">Готов.</div>
     <button id="max-exporter-stop" style="display:none;">Стоп</button>
-    <button id="max-exporter-close" style="display:none;">Закрыть</button>
+    <button id="max-exporter-close-panel" style="display:none;">Закрыть</button>
   `;
   document.documentElement.appendChild(el);
   el.querySelector('#max-exporter-stop').addEventListener('click', ()=>{ SHOULD_STOP = true; });
-  el.querySelector('#max-exporter-close').addEventListener('click', ()=>{ el.style.display = 'none'; });
+  el.querySelector('#max-exporter-close-panel').addEventListener('click', ()=>{ el.style.display = 'none'; });
   return el;
 }
 function setProgress(t){
@@ -444,9 +444,9 @@ function showElementValidationError(missingElements){
       Отсутствуют элементы:<br>
       ${missingElements.map(e => '• ' + e).join('<br>')}
     </div>
-    <button id="max-exporter-close" style="">Закрыть</button>
+    <button id="max-exporter-close-error" style="">Закрыть</button>
   `;
-  el.querySelector('#max-exporter-close').addEventListener('click', ()=>{ el.style.display = 'none'; });
+  el.querySelector('#max-exporter-close-error').addEventListener('click', ()=>{ el.style.display = 'none'; });
 }
 
 async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
@@ -460,7 +460,7 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
   RUNNING = true;
   SHOULD_STOP = false;
   ensurePanel().querySelector('#max-exporter-stop').style.display = 'block';
-  ensurePanel().querySelector('#max-exporter-close').style.display = 'none';
+  ensurePanel().querySelector('#max-exporter-close-panel').style.display = 'none';
   
   const seen = new Set();
   const out = [];
@@ -688,7 +688,7 @@ CSV: ${out.length} сообщений
   } finally {
     RUNNING = false;
     ensurePanel().querySelector('#max-exporter-stop').style.display = 'none';
-    ensurePanel().querySelector('#max-exporter-close').style.display = 'block';
+    ensurePanel().querySelector('#max-exporter-close-panel').style.display = 'block';
   }
 }
 
@@ -702,7 +702,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse)=>{
       setProgress('Ошибка: ' + (e?.message || String(e)));
       RUNNING = false;
       ensurePanel().querySelector('#max-exporter-stop').style.display = 'none';
-      ensurePanel().querySelector('#max-exporter-close').style.display = 'block';
+      ensurePanel().querySelector('#max-exporter-close-panel').style.display = 'block';
     });
     sendResponse({ok:true});
     return true;
