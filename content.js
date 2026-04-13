@@ -197,6 +197,7 @@ function looksLikePostText(text){
   
   // Исключаем служебные сообщения
   const bad = [
+    'Канал создан',
     'включить уведомления',
     'непрочитанных чата',
     'теперь в max',
@@ -241,6 +242,11 @@ function collectCandidates(){
 function extractPostFromNode(node){
   // Проверяем, что это сообщение
   if(!node.classList.contains('item') || !node.classList.contains('svelte-rg2upy')) {
+    return null;
+  }
+  
+  // Исключаем блоки с названием канала
+  if(node.querySelector('div.wrapper.wrapper--group.svelte-51ce9l')) {
     return null;
   }
   
