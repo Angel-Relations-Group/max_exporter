@@ -47,26 +47,32 @@ function parseInputDate(dateStr, isStartDate) {
   return date;
 }
 
-// Функция для парсинга даты из капсулы (например, "Сегодня", "Вчера", "24 марта 2026")
-function parseCapsuleDate(capsuleText) {
+// Функция для извлечения даты из элемента сообщения или текста капсулы
+function extractDateFromNode(node) {
+  let capsuleText = null;
+  
+  if (typeof node === 'string') {
+    capsuleText = node;
+  } else {
+    const capsule = node.querySelector('span.capsule.svelte-3850xr');
+    if (capsule) capsuleText = capsule.textContent;
+  }
+  
   if (!capsuleText) return null;
   
   const text = capsuleText.trim();
   const now = new Date();
   
-  // Проверяем "Сегодня"
   if (text === 'Сегодня') {
     return new Date(now.getFullYear(), now.getMonth(), now.getDate());
   }
   
-  // Проверяем "Вчера"
   if (text === 'Вчера') {
     const yesterday = new Date(now);
     yesterday.setDate(yesterday.getDate() - 1);
     return new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate());
   }
   
-  // Парсим дату формата "24 марта 2026"
   const months = {
     'января': 0, 'февраля': 1, 'марта': 2, 'апреля': 3,
     'мая': 4, 'июня': 5, 'июля': 6, 'августа': 7,
@@ -85,17 +91,6 @@ function parseCapsuleDate(capsuleText) {
     }
   }
   
-  return null;
-}
-
-// Функция для извлечения даты из элемента сообщения
-function extractDateFromNode(node) {
-  // Ищем капсулу с датой: <span class="capsule svelte-3850xr">Сегодня</span>
-  const capsule = node.querySelector('span.capsule.svelte-3850xr');
-  if (capsule) {
-    const date = parseCapsuleDate(capsule.textContent);
-    if (date) return date;
-  }
   return null;
 }
 
@@ -468,7 +463,7 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
       const capsule = node.querySelector('span.capsule.svelte-3850xr');
       if(capsule && useDateRange){
         // Это капсула с датой - проверяем её значение
-        const capsuleDate = parseCapsuleDate(capsule.textContent);
+        const capsuleDate = extractDateFromNode(capsule.textContent);
         if(capsuleDate){
           const capsuleDateOnly = new Date(capsuleDate.getFullYear(), capsuleDate.getMonth(), capsuleDate.getDate());
           const startDateOnly = new Date(parsedStartDate.getFullYear(), parsedStartDate.getMonth(), parsedStartDate.getDate());
