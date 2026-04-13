@@ -51,7 +51,7 @@ function parseHumanNumber(s){
 }
 
 function findViewsInText(text){
-  // Приоритет: ищем явно标注ные просмотры
+  // Приоритет: ищем явные просмотры
   const patterns = [
     /(\d[\d\s.,]*\d|\d+(?:[.,]\d+)?\s*[kкmм])\s*(?:просм|просмотров|просмотра|view|views)\b/i,
     /(?:просм|просмотров|views?)\s*[:\-]?\s*(\d[\d\s.,]*\d|\d+(?:[.,]\d+)?\s*[kкmм])\b/i
@@ -207,17 +207,6 @@ function parseCapsuleDate(capsuleText) {
   return null;
 }
 
-  // Функция для форматирования даты в строку
-function formatDate(date) {
-  if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
-    return null;
-  }
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}.${month}.${day}`;
-}
-
 // Функция для извлечения даты из элемента сообщения
 function extractDateFromNode(node) {
   // Ищем капсулу с датой: <span class="capsule svelte-3850xr">Сегодня</span>
@@ -237,7 +226,7 @@ function formatDate(date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
-  return `${year}.${month}.${day}`;
+  return `${day}.${month}.${year}`;
 }
 
 // Проверяет, является ли текст содержимым сообщения
@@ -635,7 +624,7 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
         const formattedDate = formatDate(currentDate);
         if (formattedDate) {
           // Проверяем, не начинается ли datetime уже с даты (чтобы избежать дублирования)
-          const datePattern = /^\d{4}\.\d{2}\.\d{2}\s/;
+          const datePattern = /^\d{2}\.\d{2}\.\d{4}\s/;
           if (!datePattern.test(p.datetime)) {
             // Заменяем время на дату+время
             p.datetime = `${formattedDate} ${p.datetime}`;
