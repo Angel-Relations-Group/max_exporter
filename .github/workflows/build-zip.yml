@@ -1,0 +1,33 @@
+name: Build Chrome extension zip
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create zip archive
+        run: |
+          mkdir -p dist
+          zip -r dist/max_exporter.zip . \
+            -x ".git/*" \
+            -x ".github/*" \
+            -x "dist/*" \
+            -x "*.zip" \
+            -x "node_modules/*" \
+            -x ".DS_Store"
+
+      - name: Upload zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: max_exporter
+          path: dist/max_exporter.zip
