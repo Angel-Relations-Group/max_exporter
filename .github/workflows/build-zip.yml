@@ -7,6 +7,9 @@ on:
       - master
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -31,3 +34,11 @@ jobs:
         with:
           name: max_exporter
           path: dist/max_exporter.zip
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/max_exporter.zip
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
