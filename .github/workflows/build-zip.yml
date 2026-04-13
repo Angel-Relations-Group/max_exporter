@@ -30,7 +30,7 @@ jobs:
       - name: Create zip archive
         run: |
           mkdir -p dist
-          zip -r dist/max_exporter_v${{ steps.version.outputs.VERSION }}.zip . \
+          zip -r dist/max_exporter.zip . \
             -x ".git/*" \
             -x ".github/*" \
             -x "dist/*" \
@@ -41,7 +41,7 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/max_exporter_v${{ steps.version.outputs.VERSION }}.zip
+          files: dist/max_exporter.zip
           tag_name: v${{ steps.version.outputs.VERSION }}
           generate_release_notes: true
         env:
