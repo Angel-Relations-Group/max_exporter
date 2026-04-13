@@ -114,28 +114,6 @@ function parseMetricsFromText(text){
   };
 }
 
-function extractReactions(node){
-  const breakdown = {};
-  let total = 0;
-  const buttons = Array.from(node.querySelectorAll('button,[role="button"]'));
-  for(const b of buttons){
-    const text = (b.textContent || '').replace(/\u00A0/g,' ').trim();
-    if(!text || text.length > 30) continue;
-    const numMatch = text.match(/(\d[\d\s.,]*\d|\d+(?:[.,]\d+)?\s*[kкmм])\s*$/);
-    if(!numMatch) continue;
-    const n = parseHumanNumber(numMatch[1]);
-    if(n === null || n < 0) continue;
-    const emojiPart = text.replace(numMatch[0], '').trim();
-    if(!emojiPart) continue;
-    if(/[A-Za-zА-Яа-я]/.test(emojiPart)) continue;
-    if(!/[^\x00-\x7F]/.test(emojiPart)) continue;
-    const key = emojiPart.slice(0, 8);
-    breakdown[key] = (breakdown[key] || 0) + n;
-  }
-  for(const k of Object.keys(breakdown)) total += breakdown[k];
-  return { total: total || null, breakdown: Object.keys(breakdown).length ? breakdown : null };
-}
-
 // Функция для преобразования даты ввода в дату для сравнения
 function parseInputDate(dateStr, isStartDate) {
   if (!dateStr) return null;
