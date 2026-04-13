@@ -165,6 +165,11 @@ function extractPostFromNode(node){
     return null;
   }
   
+  // Исключаем блоки с закрепленным сообщением
+  if(node.querySelector('div.container.svelte-fxkkld')) {
+    return null;
+  }
+  
   // Проверяем, является ли это кружком (short video)
   const isCircle = node.querySelector('div.videoMessage');
   
