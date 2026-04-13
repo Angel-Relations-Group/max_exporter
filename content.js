@@ -50,22 +50,6 @@ function parseHumanNumber(s){
   return Math.round(num);
 }
 
-function findViewsInText(text){
-  // Приоритет: ищем явные просмотры
-  const patterns = [
-    /(\d[\d\s.,]*\d|\d+(?:[.,]\d+)?\s*[kкmм])\s*(?:просм|просмотров|просмотра|view|views)\b/i,
-    /(?:просм|просмотров|views?)\s*[:\-]?\s*(\d[\d\s.,]*\d|\d+(?:[.,]\d+)?\s*[kкmм])\b/i
-  ];
-  for(const p of patterns){
-    const m = text.match(p);
-    if(m){
-      const n = parseHumanNumber(m[1]);
-      if(Number.isFinite(n)) return n;
-    }
-  }
-  return null;
-}
-
 // Извлекает время, просмотры и реакции из текста сообщения
 function parseMetricsFromText(text){
   const lines = text.split('\n');
