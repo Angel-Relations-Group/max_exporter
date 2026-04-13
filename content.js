@@ -112,6 +112,7 @@ function looksLikePostText(text){
   // Исключаем служебные сообщения
   const bad = [
     'Канал создан',
+    'Канал закрепил',
     'включить уведомления',
     'непрочитанных чата',
     'теперь в max',
@@ -164,34 +165,55 @@ function extractPostFromNode(node){
     return null;
   }
   
+  // Проверяем, является ли это кружком (short video)
+  const isCircle = node.querySelector('div.videoMessage');
+  
   // Извлекаем дату из капсулы
   const nodeDate = extractDateFromNode(node);
   
-  // Извлекаем текст сообщения - ищем внутри bubble
-  // Структура: div.bubble > span.text или просто текст внутри bubble
   let text = '';
-  const bubble = node.querySelector('div.bubble.svelte-1htnb3l');
-  if(bubble) {
-    const textEl = bubble.querySelector('span.text.svelte-1htnb3l');
-    if(textEl) {
-      text = normalizeText(textEl.innerText);
-    } else {
-      // Фоллбек - текст напрямую внутри bubble (может быть с Svelte комментариями)
-      text = normalizeText(bubble.innerText);
+  
+  if(isCircle) {
+    // Это кружок - текст = "Кружок"
+    text = 'Кружок';
+  } else {
+    // Извлекаем текст сообщения - ищем внутри bubble
+    // Структура: div.bubble > span.text или просто текст внутри bubble
+    const bubble = node.querySelector('div.bubble.svelte-1htnb3l');
+    if(bubble) {
+      const textEl = bubble.querySelector('span.text.svelte-1htnb3l');
+      if(textEl) {
+        text = normalizeText(textEl.innerText);
+      } else {
+        // Фоллбек - текст напрямую внутри bubble (может быть с Svelte комментариями)
+        text = normalizeText(bubble.innerText);
+      }
+    }
+    
+    // Если не нашли в bubble, пробуем весь элемент
+    if(!text) {
+      const textEl = node.querySelector('span.text.svelte-1htnb3l');
+      if(textEl) {
+        text = normalizeText(textEl.innerText);
+      } else {
+        text = normalizeText(node.innerText);
+      }
     }
   }
   
-  // Если не нашли в bubble, пробуем весь элемент
-  if(!text) {
-    const textEl = node.querySelector('span.text.svelte-1htnb3l');
-    if(textEl) {
-      text = normalizeText(textEl.innerText);
-    } else {
-      text = normalizeText(node.innerText);
+  // Удаляем время длительности из текста (для кружков)
+  if(isCircle) {
+    const timeEl = node.querySelector('div.time.svelte-2z8dlw');
+    if(timeEl) {
+      const timeText = timeEl.textContent;
+      if(timeText) {
+        text = text.replace(timeText, '').trim();
+      }
     }
   }
   
-  if(!looksLikePostText(text)) {
+  // Проверяем, является ли текст содержимым сообщения
+  if(!isCircle && !looksLikePostText(text)) {
     console.log('MAX Export: Filtered text:', text.substring(0, 50));
     return null;
   }
@@ -215,8 +237,8 @@ function extractPostFromNode(node){
   if(hasReactions) reactions = total;
   
   // Извлекаем просмотры и время из мета-блока
-  // <span class="meta svelte-1htnb3l"><div class="meta meta--text svelte-13lobfv">...
-  const metaEl = node.querySelector('span.meta.svelte-1htnb3l');
+  // Для кружков: div.meta.svelte-2z8dlw, для обычных: span.meta.svelte-1htnb3l
+  const metaEl = node.querySelector('div.meta.svelte-2z8dlw, span.meta.svelte-1htnb3l');
   let views = null;
   let datetime = '';
   
