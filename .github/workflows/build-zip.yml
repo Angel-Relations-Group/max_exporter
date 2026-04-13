@@ -5,8 +5,6 @@ on:
     branches:
       - main
       - master
-    tags:
-      - 'v*'
   workflow_dispatch:
 
 env:
@@ -23,14 +21,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Get tag
-        id: get_tag
-        run: echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT && echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+      - name: Get version from manifest
+        id: version
+        run: |
+          VERSION=$(jq -r '.version' manifest.json)
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Create zip archive
         run: |
           mkdir -p dist
-          zip -r dist/max_exporter.zip . \
+          zip -r dist/max_exporter_v${{ steps.version.outputs.VERSION }}.zip . \
             -x ".git/*" \
             -x ".github/*" \
             -x "dist/*" \
@@ -38,19 +38,11 @@ jobs:
             -x "node_modules/*" \
             -x ".DS_Store"
 
-      - name: Upload zip artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: max_exporter
-          path: dist/max_exporter.zip
-          retention-days: 30
-
       - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/max_exporter.zip
-          tag_name: ${{ steps.get_tag.outputs.TAG }}
+          files: dist/max_exporter_v${{ steps.version.outputs.VERSION }}.zip
+          tag_name: v${{ steps.version.outputs.VERSION }}
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
