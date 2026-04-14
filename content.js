@@ -305,12 +305,10 @@ function extractPostFromNode(node){
   
   return {
     datetime,
-    nodeDate,
-    views,
-    reactions_total: reactions,
     text: text,
     links: Array.from(new Set(links)),
-    images: Array.from(new Set(images))
+    views,
+    reactions_total: reactions
   };
 }
 
@@ -529,11 +527,7 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
       const p = extractPostFromNode(node);
       if(!p) continue;
       
-      // Если есть текущая дата из капсулы и у сообщения нет своей даты - добавляем её
-      if (currentDate && !p.nodeDate) {
-        p.nodeDate = currentDate;
-      }
-      // Также обновляем datetime, если есть текущая дата
+      // Обновляем datetime, если есть текущая дата
       if (currentDate && p.datetime) {
         const formattedDate = formatDate(currentDate);
         if (formattedDate) {
@@ -546,21 +540,23 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
         }
       }
       
-      // Дополнительная проверка: если у сообщения есть дата и указан startDate - проверяем что она больше или равна startDate
-      if(useDateRange && p.nodeDate && parsedStartDate){
-        const msgDateOnly = new Date(p.nodeDate.getFullYear(), p.nodeDate.getMonth(), p.nodeDate.getDate());
-        const startDateOnly = new Date(parsedStartDate.getFullYear(), parsedStartDate.getMonth(), parsedStartDate.getDate());
-        if(msgDateOnly.getTime() < startDateOnly.getTime()){
-          continue; // Сообщение старше startDate
-        }
-      }
-      
-      // Проверяем дату сообщения для конечной даты (endDate)
-      if(useDateRange && p.nodeDate && parsedEndDate){
-        const nodeDateOnly = new Date(p.nodeDate.getFullYear(), p.nodeDate.getMonth(), p.nodeDate.getDate());
-        const endDateOnly = new Date(parsedEndDate.getFullYear(), parsedEndDate.getMonth(), parsedEndDate.getDate());
-        if(nodeDateOnly.getTime() > endDateOnly.getTime()){
-          continue; // Пропускаем сообщения позже endDate
+      // Фильтрация по диапазону дат через datetime
+      if(useDateRange && p.datetime && (parsedStartDate || parsedEndDate)){
+        const dtMatch = p.datetime.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
+        if(dtMatch){
+          const msgDateOnly = new Date(parseInt(dtMatch[3]), parseInt(dtMatch[2]) - 1, parseInt(dtMatch[1]));
+          if(parsedStartDate){
+            const startDateOnly = new Date(parsedStartDate.getFullYear(), parsedStartDate.getMonth(), parsedStartDate.getDate());
+            if(msgDateOnly.getTime() < startDateOnly.getTime()){
+              continue;
+            }
+          }
+          if(parsedEndDate){
+            const endDateOnly = new Date(parsedEndDate.getFullYear(), parsedEndDate.getMonth(), parsedEndDate.getDate());
+            if(msgDateOnly.getTime() > endDateOnly.getTime()){
+              continue;
+            }
+          }
         }
       }
       
