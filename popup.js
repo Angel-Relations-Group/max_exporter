@@ -1,4 +1,3 @@
-
 const qs = (s)=>document.querySelector(s);
 function setStatus(t){ qs('#status').textContent = t; }
 

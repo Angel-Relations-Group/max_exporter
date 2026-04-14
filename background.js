@@ -1,4 +1,3 @@
-
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse)=>{
   if(msg?.type === 'MAX_EXPORT_DOWNLOAD'){
     chrome.downloads.download({

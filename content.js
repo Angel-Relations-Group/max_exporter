@@ -1,4 +1,3 @@
-
 let RUNNING = false;
 let SHOULD_STOP = false;
 
