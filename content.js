@@ -614,6 +614,19 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
     if(!a.datetime && !b.datetime) return 0;
     if(!a.datetime) return 1;
     if(!b.datetime) return -1;
+    
+    // Извлекаем дату из строки datetime (формат дд.мм.гггг чч:мм или чч:мм)
+    const dateTimeA = a.datetime.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
+    const dateTimeB = b.datetime.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
+    
+    // Если обе даты есть, сортируем по гггг.мм.дд
+    if(dateTimeA && dateTimeB) {
+      const sortKeyA = `${dateTimeA[3]}${dateTimeA[2]}${dateTimeA[1]}`; // ггггммдд
+      const sortKeyB = `${dateTimeB[3]}${dateTimeB[2]}${dateTimeB[1]}`;
+      return sortKeyA.localeCompare(sortKeyB);
+    }
+    
+    // Если нет полной даты, используем исходную сортировку
     return a.datetime.localeCompare(b.datetime);
   });
   
