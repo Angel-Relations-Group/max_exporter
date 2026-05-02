@@ -1,10 +1,31 @@
 const qs = (s)=>document.querySelector(s);
 function setStatus(t){ qs('#status').textContent = t; }
 
+async function injectContentScript(tabId){
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ['content.js']
+  });
+  await chrome.scripting.insertCSS({
+    target: { tabId },
+    files: ['content.css']
+  });
+}
+
 async function sendToTab(msg){
   const [tab] = await chrome.tabs.query({active:true, currentWindow:true});
   if(!tab?.id) throw new Error('Нет активной вкладки');
-  return chrome.tabs.sendMessage(tab.id, msg);
+  try {
+    return await chrome.tabs.sendMessage(tab.id, msg);
+  } catch(e) {
+    if(e.message?.includes('Receiving end does not exist') ||
+       e.message?.includes('Could not establish connection')) {
+      await injectContentScript(tab.id);
+      await new Promise(r => setTimeout(r, 100));
+      return chrome.tabs.sendMessage(tab.id, msg);
+    }
+    throw e;
+  }
 }
 
 qs('#run').addEventListener('click', async ()=>{

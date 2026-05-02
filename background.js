@@ -14,3 +14,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse)=>{
     return true;
   }
 });
+
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.tabs.query({
+    url: ['https://max.ru/*', 'https://web.max.ru/*']
+  }, (tabs) => {
+    for (const tab of tabs) {
+      chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ['content.js']
+      }).catch(() => {});
+      chrome.scripting.insertCSS({
+        target: { tabId: tab.id },
+        files: ['content.css']
+      }).catch(() => {});
+    }
+  });
+});

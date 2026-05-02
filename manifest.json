@@ -6,7 +6,8 @@
   "permissions": [
     "activeTab",
     "downloads",
-    "storage"
+    "storage",
+    "scripting"
   ],
   "host_permissions": [
     "https://max.ru/*",
