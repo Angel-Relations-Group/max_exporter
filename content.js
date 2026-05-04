@@ -393,6 +393,48 @@ function showElementValidationError(missingElements){
   el.querySelector('#max-exporter-close-error').addEventListener('click', ()=>{ el.style.display = 'none'; });
 }
 
+function getScrollable() {
+  const history = document.querySelector('div.history.svelte-1prjz03');
+  if (!history) return null;
+  let el = history.querySelector('.scrollable');
+  if (el) return el;
+  for (const child of history.querySelectorAll('*')) {
+    if (child.scrollHeight > child.clientHeight + 1) {
+      const style = getComputedStyle(child);
+      if (style.overflowY === 'auto' || style.overflowY === 'scroll' || style.overflowY === 'overlay') return child;
+    }
+  }
+  return null;
+}
+
+function scrollChatToTop() {
+  const scrollable = getScrollable();
+  if (scrollable) {
+    scrollable.scrollTop = 0;
+    scrollable.dispatchEvent(new Event('scroll', { bubbles: true }));
+  }
+  const history = document.querySelector('div.history.svelte-1prjz03');
+  if (history) {
+    const firstItem = history.querySelector('div.item.svelte-rg2upy');
+    if (firstItem) firstItem.scrollIntoView({ block: 'start', behavior: 'instant' });
+  }
+  window.scrollTo(0, 0);
+}
+
+function scrollChatToBottom() {
+  const scrollable = getScrollable();
+  if (scrollable) {
+    scrollable.scrollTop = scrollable.scrollHeight;
+    scrollable.dispatchEvent(new Event('scroll', { bubbles: true }));
+  }
+  const history = document.querySelector('div.history.svelte-1prjz03');
+  if (history) {
+    const items = history.querySelectorAll('div.item.svelte-rg2upy');
+    if (items.length) items[items.length - 1].scrollIntoView({ block: 'end', behavior: 'instant' });
+  }
+  window.scrollTo(0, document.body.scrollHeight);
+}
+
 async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
   // Всегда показываем панель при старте экспорта
   const panel = ensurePanel();
@@ -435,21 +477,17 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
   setProgress(`Собрано: 0`);
   
   // Прокручиваем в самый низ, чтобы начать с новых сообщений
-  window.scrollTo(0, document.body.scrollHeight);
+  scrollChatToBottom();
   await sleep(1000);
   
-  for(let i=1; i<=maxScrolls; i++){
+  const effectiveMaxScrolls = parsedStartDate ? 9999 : maxScrolls;
+  
+  for(let i=1; i<=effectiveMaxScrolls; i++){
     if(SHOULD_STOP) break;
     
-    // Прокручиваем вверх для загрузки новых сообщений
-    window.scrollTo(0, 0);
-    await sleep(delayMs || 500);
-    
-    // Если нужно найти начальную дату - ищем её (только если указан startDate)
     if(useDateRange && !startedCollecting && parsedStartDate){
       const candidates = collectCandidates();
       let foundStartDate = false;
-      let foundDateElement = null;
       let hasAnyDate = false;
       
       for(const node of candidates){
@@ -459,10 +497,8 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
           const nodeDateOnly = new Date(nodeDate.getFullYear(), nodeDate.getMonth(), nodeDate.getDate());
           const startDateOnly = new Date(parsedStartDate.getFullYear(), parsedStartDate.getMonth(), parsedStartDate.getDate());
           
-          // Ищем дату, которая МЕНЬШЕ или РАВНА искомой (это капсула с нужной датой)
-          if(nodeDateOnly.getTime() <= startDateOnly.getTime()){
+          if(nodeDateOnly.getTime() < startDateOnly.getTime()){
             foundStartDate = true;
-            foundDateElement = node;
             break;
           }
         }
@@ -470,30 +506,35 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
       
       if(foundStartDate){
         startedCollecting = true;
-        startDateElement = foundDateElement;
-        setProgress(`Найдена начальная дата. Начинаем сбор...`);
-      } else if(hasAnyDate) {
-        // Все найденные даты новее startDate — проверяем стабильность загрузки
-        if(candidates.length === prevCandidateCount) {
-          searchStableRounds++;
-        } else {
-          searchStableRounds = 0;
-          prevCandidateCount = candidates.length;
-        }
+        setProgress(`Указанная дата найдена. Начинаем сбор сообщений.`);
+      } else {
+        scrollChatToTop();
+        await sleep(delayMs || 500);
         
-        if(searchStableRounds >= 3) {
-          // Новых сообщений при прокрутке не появляется — все сообщения новее startDate
-          startedCollecting = true;
-          allMessagesAfterStartDate = true;
-          setProgress(`Все сообщения новее начальной даты. Начинаем сбор...`);
+        if(hasAnyDate){
+          if(candidates.length === prevCandidateCount) {
+            searchStableRounds++;
+          } else {
+            searchStableRounds = 0;
+            prevCandidateCount = candidates.length;
+          }
+          
+          if(searchStableRounds >= 10) {
+            startedCollecting = true;
+            allMessagesAfterStartDate = true;
+            setProgress(`Все сообщения новее начальной даты. Начинаем сбор...`);
+          } else {
+            setProgress(`Поиск даты: ${i}/${maxScrolls} (загрузка старых сообщений)`);
+            continue;
+          }
         } else {
-          setProgress(`Поиск даты: ${i}/${maxScrolls} (все даты новее)`);
+          setProgress(`Поиск даты: ${i}/${maxScrolls}`);
           continue;
         }
-      } else {
-        setProgress(`Поиск даты: ${i}/${maxScrolls}`);
-        continue;
       }
+    } else if(!parsedStartDate) {
+      scrollChatToTop();
+      await sleep(delayMs || 500);
     }
     
     // Сбор сообщений
@@ -501,7 +542,7 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
     const allItems = collectCandidates();
     
     // Флаг: видели ли мы капсулу с начальной датой
-    let foundStartDateSeparator = !parsedStartDate || allMessagesAfterStartDate;
+    let foundStartDateSeparator = !parsedStartDate || allMessagesAfterStartDate || startedCollecting;
     
     // Текущая дата (из последней найденной капсулы)
     let currentDate = null;
