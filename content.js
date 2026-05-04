@@ -414,6 +414,9 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
   const out = [];
   let stableRounds = 0;
   let lastCount = 0;
+  let searchStableRounds = 0;
+  let prevCandidateCount = 0;
+  let allMessagesAfterStartDate = false;
   
   // Парсим даты
   const parsedStartDate = parseInputDate(startDate, true);
@@ -447,11 +450,12 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
       const candidates = collectCandidates();
       let foundStartDate = false;
       let foundDateElement = null;
+      let hasAnyDate = false;
       
       for(const node of candidates){
         const nodeDate = extractDateFromNode(node);
         if(nodeDate){
-          // Сравниваем даты (только день, месяц, год)
+          hasAnyDate = true;
           const nodeDateOnly = new Date(nodeDate.getFullYear(), nodeDate.getMonth(), nodeDate.getDate());
           const startDateOnly = new Date(parsedStartDate.getFullYear(), parsedStartDate.getMonth(), parsedStartDate.getDate());
           
@@ -466,12 +470,29 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
       
       if(foundStartDate){
         startedCollecting = true;
-        // Сохраняем элемент с датой, чтобы знать позицию
         startDateElement = foundDateElement;
         setProgress(`Найдена начальная дата. Начинаем сбор...`);
+      } else if(hasAnyDate) {
+        // Все найденные даты новее startDate — проверяем стабильность загрузки
+        if(candidates.length === prevCandidateCount) {
+          searchStableRounds++;
+        } else {
+          searchStableRounds = 0;
+          prevCandidateCount = candidates.length;
+        }
+        
+        if(searchStableRounds >= 3) {
+          // Новых сообщений при прокрутке не появляется — все сообщения новее startDate
+          startedCollecting = true;
+          allMessagesAfterStartDate = true;
+          setProgress(`Все сообщения новее начальной даты. Начинаем сбор...`);
+        } else {
+          setProgress(`Поиск даты: ${i}/${maxScrolls} (все даты новее)`);
+          continue;
+        }
       } else {
         setProgress(`Поиск даты: ${i}/${maxScrolls}`);
-        continue; // Продолжаем прокрутку
+        continue;
       }
     }
     
@@ -480,7 +501,7 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
     const allItems = collectCandidates();
     
     // Флаг: видели ли мы капсулу с начальной датой
-    let foundStartDateSeparator = !parsedStartDate; // Если нет startDate - сразу начинаем
+    let foundStartDateSeparator = !parsedStartDate || allMessagesAfterStartDate;
     
     // Текущая дата (из последней найденной капсулы)
     let currentDate = null;
