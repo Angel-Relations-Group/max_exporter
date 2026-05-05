@@ -538,9 +538,6 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
     let added = 0;
     const allItems = collectCandidates();
     
-    // Флаг: видели ли мы капсулу с начальной датой
-    let foundStartDateSeparator = !parsedStartDate || allMessagesAfterStartDate || startedCollecting;
-    
     // Текущая дата (из последней найденной капсулы)
     let currentDate = null;
     
@@ -550,30 +547,17 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
       // Проверяем, есть ли в этом элементе капсула с датой
       const capsule = node.querySelector('span.capsule.svelte-3850xr');
       if(capsule && useDateRange && parsedStartDate){
-        // Это капсула с датой - проверяем её значение (только если есть startDate)
         const capsuleDate = extractDateFromNode(capsule.textContent);
         if(capsuleDate){
           const capsuleDateOnly = new Date(capsuleDate.getFullYear(), capsuleDate.getMonth(), capsuleDate.getDate());
           const startDateOnly = new Date(parsedStartDate.getFullYear(), parsedStartDate.getMonth(), parsedStartDate.getDate());
           
-          // Если капсула МЕНЬШЕ startDate - нашли разделитель
           if(capsuleDateOnly.getTime() < startDateOnly.getTime()){
-            foundStartDateSeparator = true;
             currentDate = capsuleDate;
-            continue; // Пропускаем старую дату
-          } else {
-            // Капсула БОЛЬШЕ или РАВНА startDate - нашли нужный диапазон!
-            foundStartDateSeparator = true;
-            currentDate = capsuleDate;
-            // Продолжаем обработку элемента
+            continue;
           }
+          currentDate = capsuleDate;
         }
-        // Если капсула есть, но не удалось распарсить дату - продолжаем обработку
-      }
-      
-      // Если startDate указан и капсулу начальной даты ещё не нашли - пропускаем всё до неё
-      if(parsedStartDate && !foundStartDateSeparator){
-        continue;
       }
       
       // Обновляем текущую дату из узла, если она есть (для сообщений без капсулы, но после неё)

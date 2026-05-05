@@ -38,7 +38,7 @@ qs('#run').addEventListener('click', async ()=>{
     setStatus('Запуск...');
     const resp = await sendToTab({
       type:'MAX_EXPORT_START',
-      maxScrolls: parseInt(qs('#maxScrolls').value || '120', 10),
+      maxScrolls: parseInt(qs('#maxScrolls').value || '5', 10),
       delayMs: parseInt(qs('#delayMs').value || '350', 10),
       format: qs('#format').value,
       startDate: qs('#startDate').value || null,
