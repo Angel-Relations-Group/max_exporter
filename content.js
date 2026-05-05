@@ -524,11 +524,11 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
             allMessagesAfterStartDate = true;
             setProgress(`Все сообщения новее начальной даты. Начинаем сбор...`);
           } else {
-            setProgress(`Поиск даты: ${i}/${maxScrolls} (загрузка старых сообщений)`);
+            setProgress(`Поиск даты (загрузка старых сообщений)`);
             continue;
           }
         } else {
-          setProgress(`Поиск даты: ${i}/${maxScrolls}`);
+          setProgress(`Поиск даты: ${i}/${effectiveMaxScrolls}`);
           continue;
         }
       }
@@ -637,7 +637,7 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
     }
     
     // Формируем статус
-    let statusText = `Шаг ${i}/${maxScrolls}`;
+    let statusText = `Шаг ${i}/${effectiveMaxScrolls}`;
     if(useDateRange && startedCollecting){
       statusText += ` (по датам)`;
     } else if(useDateRange){
