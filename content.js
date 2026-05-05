@@ -471,9 +471,6 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
   // Если нет startDate - сразу начинаем сбор (режим только с endDate)
   let startedCollecting = !parsedStartDate;
   
-  // Элемент с капсулой начальной даты
-  let startDateElement = null;
-  
   setProgress(`Собрано: 0`);
   
   // Прокручиваем в самый низ, чтобы начать с новых сообщений
