@@ -2,6 +2,9 @@ const qs = (s)=>document.querySelector(s);
 function setStatus(t){ qs('#status').textContent = t; }
 
 async function injectContentScript(tabId){
+  if (!chrome.scripting) {
+    throw new Error('Scripting API not available');
+  }
   await chrome.scripting.executeScript({
     target: { tabId },
     files: ['content.js']
