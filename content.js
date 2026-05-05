@@ -104,6 +104,10 @@ function formatDate(date) {
   return `${day}.${month}.${year}`;
 }
 
+function dateOnly(d){
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
 // Проверяет, является ли текст содержимым сообщения
 function looksLikePostText(text){
   if(!text || text.length < 2) return false;
@@ -153,7 +157,7 @@ function collectCandidates(){
   return candidates;
 }
 
-function extractPostFromNode(node){
+function extractPostFromNode(node, extractedDate){
   // Проверяем, что это сообщение
   if(!node.classList.contains('item') || !node.classList.contains('svelte-rg2upy')) {
     return null;
@@ -172,8 +176,7 @@ function extractPostFromNode(node){
   // Проверяем, является ли это кружком (short video)
   const isCircle = node.querySelector('div.videoMessage');
   
-  // Извлекаем дату из капсулы
-  const nodeDate = extractDateFromNode(node);
+  const nodeDate = extractedDate !== undefined ? extractedDate : extractDateFromNode(node);
   
   let text = '';
   
@@ -449,8 +452,8 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
   
   RUNNING = true;
   SHOULD_STOP = false;
-  ensurePanel().querySelector('#max-exporter-stop').style.display = 'block';
-  ensurePanel().querySelector('#max-exporter-close-panel').style.display = 'none';
+  panel.querySelector('#max-exporter-stop').style.display = 'block';
+  panel.querySelector('#max-exporter-close-panel').style.display = 'none';
   
   const seen = new Set();
   const out = [];
@@ -463,6 +466,8 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
   // Парсим даты
   const parsedStartDate = parseInputDate(startDate, true);
   const parsedEndDate = parseInputDate(endDate, false);
+  const startDateOnly = parsedStartDate ? dateOnly(parsedStartDate) : null;
+  const endDateOnly = parsedEndDate ? dateOnly(parsedEndDate) : null;
   
   // Флаг: режим фильтрации по датам (активен если указана хотя бы одна дата)
   const useDateRange = !!parsedStartDate || !!parsedEndDate;
@@ -491,10 +496,7 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
         const nodeDate = extractDateFromNode(node);
         if(nodeDate){
           hasAnyDate = true;
-          const nodeDateOnly = new Date(nodeDate.getFullYear(), nodeDate.getMonth(), nodeDate.getDate());
-          const startDateOnly = new Date(parsedStartDate.getFullYear(), parsedStartDate.getMonth(), parsedStartDate.getDate());
-          
-          if(nodeDateOnly.getTime() < startDateOnly.getTime()){
+          if(dateOnly(nodeDate).getTime() < startDateOnly.getTime()){
             foundStartDate = true;
             break;
           }
@@ -549,10 +551,7 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
       if(capsule && useDateRange && parsedStartDate){
         const capsuleDate = extractDateFromNode(capsule.textContent);
         if(capsuleDate){
-          const capsuleDateOnly = new Date(capsuleDate.getFullYear(), capsuleDate.getMonth(), capsuleDate.getDate());
-          const startDateOnly = new Date(parsedStartDate.getFullYear(), parsedStartDate.getMonth(), parsedStartDate.getDate());
-          
-          if(capsuleDateOnly.getTime() < startDateOnly.getTime()){
+          if(dateOnly(capsuleDate).getTime() < startDateOnly.getTime()){
             currentDate = capsuleDate;
             continue;
           }
@@ -566,7 +565,7 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
         currentDate = nodeDate;
       }
       
-      const p = extractPostFromNode(node);
+      const p = extractPostFromNode(node, nodeDate);
       if(!p) continue;
       
       // Обновляем datetime, если есть текущая дата
@@ -587,17 +586,11 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
         const dtMatch = p.datetime.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
         if(dtMatch){
           const msgDateOnly = new Date(parseInt(dtMatch[3]), parseInt(dtMatch[2]) - 1, parseInt(dtMatch[1]));
-          if(parsedStartDate){
-            const startDateOnly = new Date(parsedStartDate.getFullYear(), parsedStartDate.getMonth(), parsedStartDate.getDate());
-            if(msgDateOnly.getTime() < startDateOnly.getTime()){
-              continue;
-            }
+          if(startDateOnly && msgDateOnly.getTime() < startDateOnly.getTime()){
+            continue;
           }
-          if(parsedEndDate){
-            const endDateOnly = new Date(parsedEndDate.getFullYear(), parsedEndDate.getMonth(), parsedEndDate.getDate());
-            if(msgDateOnly.getTime() > endDateOnly.getTime()){
-              continue;
-            }
+          if(endDateOnly && msgDateOnly.getTime() > endDateOnly.getTime()){
+            continue;
           }
         }
       }
@@ -690,8 +683,8 @@ CSV: ${out.length} сообщений
     setProgress(`Ошибка скачивания:\n${e.message}`);
   } finally {
     RUNNING = false;
-    ensurePanel().querySelector('#max-exporter-stop').style.display = 'none';
-    ensurePanel().querySelector('#max-exporter-close-panel').style.display = 'block';
+    panel.querySelector('#max-exporter-stop').style.display = 'none';
+    panel.querySelector('#max-exporter-close-panel').style.display = 'block';
   }
 }
 
