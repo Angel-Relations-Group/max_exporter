@@ -33,16 +33,10 @@ function normalizeText(t){
 }
 
 // Функция для преобразования даты ввода в дату для сравнения
-function parseInputDate(dateStr, isStartDate) {
+function parseInputDate(dateStr) {
   if (!dateStr) return null;
   const date = new Date(dateStr);
   if (isNaN(date.getTime())) return null;
-  // Сбрасываем время на начало или конец дня
-  if (isStartDate) {
-    date.setHours(0, 0, 0, 0);
-  } else {
-    date.setHours(23, 59, 59, 999);
-  }
   return date;
 }
 
@@ -458,14 +452,12 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
   const seen = new Set();
   const out = [];
   let stableRounds = 0;
-  let lastCount = 0;
   let searchStableRounds = 0;
   let prevCandidateCount = 0;
-  let allMessagesAfterStartDate = false;
   
   // Парсим даты
-  const parsedStartDate = parseInputDate(startDate, true);
-  const parsedEndDate = parseInputDate(endDate, false);
+  const parsedStartDate = parseInputDate(startDate);
+  const parsedEndDate = parseInputDate(endDate);
   const startDateOnly = parsedStartDate ? dateOnly(parsedStartDate) : null;
   const endDateOnly = parsedEndDate ? dateOnly(parsedEndDate) : null;
   
@@ -520,7 +512,6 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
           
           if(searchStableRounds >= 10) {
             startedCollecting = true;
-            allMessagesAfterStartDate = true;
             setProgress(`Все сообщения новее начальной даты. Начинаем сбор...`);
           } else {
             setProgress(`Поиск даты (загрузка старых сообщений)`);
@@ -582,7 +573,7 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
       }
       
       // Фильтрация по диапазону дат через datetime
-      if(useDateRange && p.datetime && (parsedStartDate || parsedEndDate)){
+      if(useDateRange && p.datetime){
         const dtMatch = p.datetime.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
         if(dtMatch){
           const msgDateOnly = new Date(parseInt(dtMatch[3]), parseInt(dtMatch[2]) - 1, parseInt(dtMatch[1]));
@@ -607,7 +598,6 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
       stableRounds++;
     } else {
       stableRounds = 0;
-      lastCount = out.length;
     }
     
     // Формируем статус
