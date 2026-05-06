@@ -350,7 +350,6 @@ function downloadViaBackground(blob, filename){
   });
 }
 
-// Валидация: проверяем наличие необходимых элементов на странице
 function validateRequiredElements(){
   const requiredSelectors = [
     { selector: 'div.history.svelte-1prjz03', name: 'История сообщений (div.history.svelte-1prjz03)' },
@@ -368,25 +367,23 @@ function validateRequiredElements(){
     console.warn('MAX Export: Отсутствуют необходимые элементы на странице:', missing);
   }
   
-  return missing;
+  return { type: missing.length > 0 ? 'structure_changed' : 'ok', missing };
 }
 
-function showElementValidationError(missingElements){
+function showElementValidationError(result){
   const el = ensurePanel();
-  el.innerHTML = `
-    <div style="font-weight:700;margin-bottom:6px;">MAX Export</div>
-    <div class="muted" style="color: #dc3545; margin-bottom: 10px;">
-      ⚠️ Не удалось найти необходимые элементы на странице.<br>
-      Вероятно, структура сайта изменилась.<br>
-      Пожалуйста, свяжитесь с нами для обновления:<br>
-      <a href="mailto:cto@a-rg.com" style="color: #0d6efd;">cto@a-rg.com</a>
-    </div>
-    <div class="mono" style="font-size: 11px; margin-bottom: 10px;">
-      Отсутствуют элементы:<br>
-      ${missingElements.map(e => '• ' + e).join('<br>')}
-    </div>
-    <button id="max-exporter-close-error" style="">Закрыть</button>
-  `;
+  el.innerHTML = '<div style="font-weight:700;margin-bottom:6px;">MAX Export</div>' +
+    '<div class="muted" style="color: #dc3545; margin-bottom: 10px;">' +
+    '⚠️ Не удалось найти необходимые элементы на странице.<br>' +
+    'Вероятно, структура сайта изменилась.<br>' +
+    'Пожалуйста, свяжитесь с нами для обновления:<br>' +
+    '<a href="mailto:cto@a-rg.com" style="color: #0d6efd;">cto@a-rg.com</a>' +
+    '</div>' +
+    '<div class="mono" style="font-size: 11px; margin-bottom: 10px;">' +
+    'Отсутствуют элементы:<br>' +
+    result.missing.map(e => '• ' + e).join('<br>') +
+    '</div>' +
+    '<button id="max-exporter-close-error" style="">Закрыть</button>';
   el.querySelector('#max-exporter-close-error').addEventListener('click', ()=>{ el.style.display = 'none'; });
 }
 
@@ -438,9 +435,9 @@ async function exportPosts({maxScrolls, delayMs, format, startDate, endDate}){
   panel.style.display = 'block';
   
   // Проверяем наличие необходимых элементов на странице
-  const missingElements = validateRequiredElements();
-  if(missingElements.length > 0){
-    showElementValidationError(missingElements);
+  const validationResult = validateRequiredElements();
+  if(validationResult.type !== 'ok'){
+    showElementValidationError(validationResult);
     return;
   }
   

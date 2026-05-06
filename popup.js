@@ -33,6 +33,17 @@ async function sendToTab(msg){
 
 qs('#run').addEventListener('click', async ()=>{
   try{
+    const [tab] = await chrome.tabs.query({active:true, currentWindow:true});
+    if(!tab?.id){
+      setStatus('Нет активной вкладки');
+      return;
+    }
+    const host = new URL(tab.url).hostname;
+    if(host !== 'max.ru' && host !== 'web.max.ru' && !host.endsWith('.max.ru')){
+      setStatus('⚠️ Откройте вкладку max.ru или web.max.ru');
+      return;
+    }
+
     qs('#run').style.display='none';
     qs('#stop').style.display='block';
     setStatus('Запуск...');

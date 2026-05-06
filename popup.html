@@ -16,22 +16,22 @@ button{width:100%;padding:10px;font-size:13px;cursor:pointer;margin-top:8px}
 </head>
 <body>
   <div class="row">
-    <div class="hint">Откройте канал или чат MAX на активной вкладке, затем нажмите «Экспорт».</div>
+    <div class="hint">Откройте доступный вам канал или чат MAX на активной вкладке, выберите параметры и нажмите «Экспорт».</div>
   </div>
   <div class="row">
     <label>Шаги прокрутки</label>
     <input id="maxScrolls" type="number" min="5" max="5000" value="5" />
-    <div class="hint">Если указана начальная дата — поле игнорируется</div>
+    <div class="hint">Если указана начальная дата – поле игнорируется</div>
   </div>
   <div class="row">
     <label>Начальная дата (необязательно)</label>
     <input id="startDate" type="date" />
-    <div class="hint">Если указана - экспорт начнётся с этой даты</div>
+    <div class="hint">Если указана – экспорт начнётся с этой даты</div>
   </div>
   <div class="row">
     <label>Конечная дата (необязательно)</label>
     <input id="endDate" type="date" />
-    <div class="hint">Если указана - экспорт закончится этой датой</div>
+    <div class="hint">Если указана – экспорт закончится этой датой</div>
   </div>
   <div class="row">
     <label>Пауза между прокрутками (мс)</label>
@@ -47,6 +47,7 @@ button{width:100%;padding:10px;font-size:13px;cursor:pointer;margin-top:8px}
   <button id="run">Экспорт</button>
   <button id="stop" style="display:none;">Стоп</button>
   <div id="status" class="status"></div>
+  <div сlass="hint">❗Расширение работает локально в браузере и не&nbspотправляет никакие данные на внешние серверы.</div>
   <div style="margin-top:12px;text-align:center;font-size:11px;color:#999;">developed by <a href="https://a-rg.com" target="_blank" style="color:#999;">a-rg.com</a></div>
 <script src="popup.js"></script>
 </body>
