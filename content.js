@@ -291,26 +291,27 @@ async function doExport(params) {
   scrollChatToBottom();
   await sleep(800);
 
+  function reachedStartDate() {
+    const wsMin = getMinWsTimeAfter(wsCountBeforeScroll);
+    return wsMin > 0 && wsMin < startMs;
+  }
+
   for(let i = 1; i <= effectiveMaxScrolls; i++){
     if(SHOULD_STOP) break;
 
-    if(useDateRange) {
+    if(useDateRange && reachedStartDate()) {
       const wsMin = getMinWsTimeAfter(wsCountBeforeScroll);
-      if(wsMin > 0 && wsMin < startMs) {
-        setProgress(`Дата начала достигнута (${formatWsTime(wsMin)}). WS: ${wsMessages.size}`);
-        break;
-      }
+      setProgress(`Дата начала достигнута (${formatWsTime(wsMin)}). WS: ${wsMessages.size}`);
+      break;
     }
 
     scrollChatToTop();
     await sleep(delayMs || 500);
 
-    if(useDateRange) {
+    if(useDateRange && reachedStartDate()) {
       const wsMin = getMinWsTimeAfter(wsCountBeforeScroll);
-      if(wsMin > 0 && wsMin < startMs) {
-        setProgress(`Дата начала достигнута (${formatWsTime(wsMin)}). WS: ${wsMessages.size}`);
-        break;
-      }
+      setProgress(`Дата начала достигнута (${formatWsTime(wsMin)}). WS: ${wsMessages.size}`);
+      break;
     }
 
     const history = document.querySelector(SEL_HISTORY);
