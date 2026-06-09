@@ -17,7 +17,7 @@
     const hex = n.toString(16).padStart(Math.ceil(n.toString(16).length / 2) * 2, '0');
     const bytes = [];
     for (let i = 0; i < hex.length; i += 2) {
-      bytes.push(String.fromCharCode(parseInt(hex.substr(i, 2), 16)));
+      bytes.push(String.fromCharCode(parseInt(hex.substring(i, i + 2), 16)));
     }
     return btoa(bytes.join('')).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   }
