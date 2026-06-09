@@ -31,6 +31,10 @@ async function sendToTab(msg){
   }
 }
 
+qs('#paginationEnabled').addEventListener('change', function(){
+  qs('#paginationFields').style.display = this.checked ? 'block' : 'none';
+});
+
 qs('#run').addEventListener('click', async ()=>{
   try{
     const [tab] = await chrome.tabs.query({active:true, currentWindow:true});
@@ -55,7 +59,9 @@ qs('#run').addEventListener('click', async ()=>{
       startDate: qs('#startDate').value || null,
       endDate: qs('#endDate').value || null,
       startDateSet: qs('#startDate').value !== '',
-      endDateSet: qs('#endDate').value !== ''
+      endDateSet: qs('#endDate').value !== '',
+      paginationEnabled: qs('#paginationEnabled').checked,
+      paginationRows: parseInt(qs('#paginationRows').value || '350', 10)
     });
     if(!resp?.ok){
       setStatus('Не удалось запустить: ' + (resp?.error || 'unknown'));

@@ -266,7 +266,7 @@ function exportPosts(params) {
 }
 
 async function doExport(params) {
-  const {maxScrolls, delayMs, format, startDate, endDate, startDateSet, endDateSet} = params;
+  const {maxScrolls, delayMs, format, startDate, endDate, startDateSet, endDateSet, paginationEnabled, paginationRows} = params;
 
   if(!validateRequiredElements()){
     setProgress('Ошибка: не найдены элементы чата на странице');
@@ -378,20 +378,27 @@ async function doExport(params) {
 
   try {
     const ts = new Date().toISOString().replace(/[:.]/g,'-');
-    if(format === 'json'){
-      const blob = new Blob([JSON.stringify(out, null, 2)], {type:'application/json'});
-      await downloadViaBackground(blob, `max_${slug}_${ts}.json`);
-      setProgress(`Готово.
-JSON: ${out.length} сообщений
-Файл должен был начать скачиваться.`);
-    } else {
-      const csv = toExcelCsv(out);
-      const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
-      await downloadViaBackground(blob, `max_${slug}_${ts}.csv`);
-      setProgress(`Готово.
-CSV: ${out.length} сообщений
-Файл должен был начать скачиваться.`);
+    const chunkSize = (paginationEnabled && paginationRows > 0) ? paginationRows : out.length;
+    const totalParts = Math.ceil(out.length / chunkSize);
+
+    for (let part = 0; part < totalParts; part++) {
+      const chunk = out.slice(part * chunkSize, (part + 1) * chunkSize);
+      const suffix = totalParts > 1 ? `_part${part + 1}of${totalParts}` : '';
+
+      if(format === 'json'){
+        const blob = new Blob([JSON.stringify(chunk, null, 2)], {type:'application/json'});
+        await downloadViaBackground(blob, `max_${slug}_${ts}${suffix}.json`);
+      } else {
+        const csv = toExcelCsv(chunk);
+        const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+        await downloadViaBackground(blob, `max_${slug}_${ts}${suffix}.csv`);
+      }
     }
+
+    const partInfo = totalParts > 1 ? ` в ${totalParts} файлах (${chunkSize} строк/файл)` : '';
+    setProgress(`Готово.
+${format.toUpperCase()}: ${out.length} сообщений${partInfo}
+Файл должен был начать скачиваться.`);
   } catch (e) {
     setProgress(`Ошибка скачивания:\n${e.message}`);
   } finally {

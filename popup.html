@@ -44,6 +44,16 @@ button{width:100%;padding:10px;font-size:13px;cursor:pointer;margin-top:8px}
       <option value="json">JSON</option>
     </select>
   </div>
+  <div class="row">
+    <label style="display:flex;align-items:center;gap:8px;margin-bottom:0;cursor:pointer">
+      <input id="paginationEnabled" type="checkbox" style="width:auto" />
+      Пагинация
+    </label>
+    <div id="paginationFields" style="display:none;margin-top:6px;">
+      <input id="paginationRows" type="number" min="10" max="100000" value="350" />
+      <div class="hint">Макс. количество строк в одном файле</div>
+    </div>
+  </div>
   <button id="run">Экспорт</button>
   <button id="stop" style="display:none;">Стоп</button>
   <div id="status" class="status"></div>
