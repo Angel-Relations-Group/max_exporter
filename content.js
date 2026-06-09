@@ -281,7 +281,7 @@ async function doExport(params) {
   const endMs = parsedEndDate ? parsedEndDate.getTime() + 86400000 : Infinity;
   const useDateRange = !!(startDateSet && parsedStartDate) || !!(endDateSet && parsedEndDate);
 
-  const effectiveMaxScrolls = useDateRange ? 9999 : Math.min(maxScrolls, 50);
+  const effectiveMaxScrolls = useDateRange ? 9999 : Math.min(maxScrolls, 500);
   let stableRounds = 0;
   let prevDomCount = 0;
 
