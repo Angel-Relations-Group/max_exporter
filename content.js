@@ -23,8 +23,34 @@
   }
 
   let _resolvedSlug = null;
+  let _lastPathname = location.pathname;
+  const wsMessages = new Map();
+  const slugMap = new Map();
+
+  function resetOnNavigate() {
+    const cur = location.pathname;
+    if (cur !== _lastPathname) {
+      _resolvedSlug = null;
+      _lastPathname = cur;
+      wsMessages.clear();
+      slugMap.clear();
+    }
+  }
+
+  window.addEventListener('popstate', resetOnNavigate);
+  const _origPushState = history.pushState;
+  history.pushState = function() {
+    _origPushState.apply(this, arguments);
+    resetOnNavigate();
+  };
+  const _origReplaceState = history.replaceState;
+  history.replaceState = function() {
+    _origReplaceState.apply(this, arguments);
+    resetOnNavigate();
+  };
 
   async function findChannelSlug() {
+    resetOnNavigate();
     if (_resolvedSlug) return _resolvedSlug;
     const urlSlug = location.pathname.split('/').filter(Boolean)[0] || 'unknown';
     if (!/^-?\d+$/.test(urlSlug)) { _resolvedSlug = urlSlug; return urlSlug; }
@@ -52,9 +78,6 @@
     _resolvedSlug = urlSlug;
     return urlSlug;
   }
-
-  const wsMessages = new Map();
-  const slugMap = new Map();
 
   (function initWSInterception() {
     window.addEventListener('message', function(e) {
@@ -292,6 +315,8 @@
     setProgress(`Скролл... WS до скролла: ${wsMessages.size}`);
     const wsCountBeforeScroll = wsMessages.size;
 
+    // Скролл вниз, чтобы подгрузить самые свежие сообщения —
+    // дальше цикл будет скроллить вверх, подгружая всё более старые.
     scrollChatToBottom();
     await sleep(800);
 
