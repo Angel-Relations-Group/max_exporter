@@ -24,10 +24,10 @@ function wsInterceptionCode() {
     if (!p || !p.payload) return;
     deepCapture(p.payload, 0);
     extractSlugFromObj(p, 0);
-    scanSlugKeys(p, 'root', 0, null);
+    scanSlugKeys(p, 0, null);
   }
 
-  function scanSlugKeys(obj, path, depth, inheritedId) {
+  function scanSlugKeys(obj, depth, inheritedId) {
     if (depth > 6 || !obj || typeof obj !== 'object') return;
     try {
       var localId = obj.chatId || obj.peerId || obj.dialogId || obj.channelId || inheritedId;
@@ -49,7 +49,7 @@ function wsInterceptionCode() {
           }
         }
         if (typeof val === 'object' && val !== null) {
-          scanSlugKeys(val, path + '.' + key, depth + 1, localId);
+          scanSlugKeys(val, depth + 1, localId);
         }
       }
     } catch(e) {}
