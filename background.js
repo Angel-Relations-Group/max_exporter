@@ -22,9 +22,6 @@ function wsInterceptionCode() {
 
   function handlePayload(p) {
     if (!p || !p.payload) return;
-    if (p.payload.messages && Array.isArray(p.payload.messages)) {
-      p.payload.messages.forEach(captureMsg);
-    }
     deepCapture(p.payload, 0);
     extractSlugFromObj(p, 0);
     scanSlugKeys(p, 'root', 0, null);
