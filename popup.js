@@ -53,7 +53,9 @@ qs('#run').addEventListener('click', async ()=>{
       delayMs: parseInt(qs('#delayMs').value || '350', 10),
       format: qs('#format').value,
       startDate: qs('#startDate').value || null,
-      endDate: qs('#endDate').value || null
+      endDate: qs('#endDate').value || null,
+      startDateSet: qs('#startDate').value !== '',
+      endDateSet: qs('#endDate').value !== ''
     });
     if(!resp?.ok){
       setStatus('Не удалось запустить: ' + (resp?.error || 'unknown'));
