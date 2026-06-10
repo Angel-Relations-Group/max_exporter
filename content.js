@@ -180,7 +180,9 @@
 
   function parseInputDate(dateStr) {
     if (!dateStr) return null;
-    const date = new Date(dateStr);
+    const parts = dateStr.split('-');
+    if (parts.length !== 3) return null;
+    const date = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
     if (isNaN(date.getTime())) return null;
     return date;
   }
@@ -320,13 +322,30 @@
 
     // Скролл вниз, чтобы подгрузить самые свежие сообщения —
     // дальше цикл будет скроллить вверх, подгружая всё более старые.
+    const historyEl = document.querySelector(SEL_HISTORY);
+
     scrollChatToBottom();
     await sleep(800);
 
+    if (document.querySelector('span.scrollButtonCounter')) {
+      let prevBottomCount = 0;
+      let bottomStable = 0;
+      for (let j = 0; j < 50 && bottomStable < 3; j++) {
+        scrollChatToBottom();
+        await sleep(300);
+        const bottomCount = historyEl ? historyEl.querySelectorAll(SEL_ITEM).length : 0;
+        if (bottomCount === prevBottomCount) {
+          bottomStable++;
+        } else {
+          bottomStable = 0;
+          prevBottomCount = bottomCount;
+        }
+        if (!document.querySelector('span.scrollButtonCounter')) break;
+      }
+    }
+
     _trackMinTime = true;
     _minNewTime = Infinity;
-
-    const historyEl = document.querySelector(SEL_HISTORY);
 
     for(let i = 1; i <= effectiveMaxScrolls; i++){
       if(SHOULD_STOP) break;
