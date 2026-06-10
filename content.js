@@ -26,6 +26,8 @@
   let _lastPathname = location.pathname;
   const wsMessages = new Map();
   const slugMap = new Map();
+  let _trackMinTime = false;
+  let _minNewTime = Infinity;
 
   function resetOnNavigate() {
     const cur = location.pathname;
@@ -34,6 +36,8 @@
       _lastPathname = cur;
       wsMessages.clear();
       slugMap.clear();
+      _trackMinTime = false;
+      _minNewTime = Infinity;
     }
   }
 
@@ -92,6 +96,9 @@
             reactions: e.data.reactions || 0,
             msgType: e.data.msgType || ''
           });
+          if (_trackMinTime && (e.data.time || 0) > 0) {
+            _minNewTime = Math.min(_minNewTime, e.data.time);
+          }
         }
       }
       if (e.data.type === 'MAX_EXPORT_SLUG_MAP') {
@@ -262,16 +269,6 @@
     }
   }
 
-  function getMinWsTimeAfter(skipCount) {
-    let idx = 0;
-    let minT = Infinity;
-    for (const m of wsMessages.values()) {
-      if (idx >= skipCount && m.time > 0 && m.time < minT) minT = m.time;
-      idx++;
-    }
-    return minT < Infinity ? minT : 0;
-  }
-
   function getDomMessages() {
     const msgs = [];
     const history = document.querySelector(SEL_HISTORY);
@@ -315,42 +312,34 @@
     const useDateRange = !!(startDateSet && parsedStartDate) || !!(endDateSet && parsedEndDate);
 
     const effectiveMaxScrolls = useDateRange ? 9999 : Math.min(maxScrolls, 500);
+    const maxStable = useDateRange ? 20 : 12;
     let stableRounds = 0;
     let prevDomCount = 0;
 
     setProgress(`Скролл... WS до скролла: ${wsMessages.size}`);
-    const wsCountBeforeScroll = wsMessages.size;
 
     // Скролл вниз, чтобы подгрузить самые свежие сообщения —
     // дальше цикл будет скроллить вверх, подгружая всё более старые.
     scrollChatToBottom();
     await sleep(800);
 
-    function reachedStartDate() {
-      const wsMin = getMinWsTimeAfter(wsCountBeforeScroll);
-      return wsMin > 0 && wsMin < startMs;
-    }
+    _trackMinTime = true;
+    _minNewTime = Infinity;
+
+    const historyEl = document.querySelector(SEL_HISTORY);
 
     for(let i = 1; i <= effectiveMaxScrolls; i++){
       if(SHOULD_STOP) break;
 
-      if(useDateRange && reachedStartDate()) {
-        const wsMin = getMinWsTimeAfter(wsCountBeforeScroll);
-        setProgress(`Дата начала достигнута (${formatWsTime(wsMin)}). WS: ${wsMessages.size}`);
-        break;
-      }
-
       scrollChatToTop();
       await sleep(delayMs || 500);
 
-      if(useDateRange && reachedStartDate()) {
-        const wsMin = getMinWsTimeAfter(wsCountBeforeScroll);
-        setProgress(`Дата начала достигнута (${formatWsTime(wsMin)}). WS: ${wsMessages.size}`);
+      if(useDateRange && _minNewTime < Infinity && _minNewTime < startMs) {
+        setProgress(`Дата начала достигнута (${formatWsTime(_minNewTime)}). WS: ${wsMessages.size}`);
         break;
       }
 
-      const history = document.querySelector(SEL_HISTORY);
-      const curDomCount = history ? history.querySelectorAll(SEL_ITEM).length : 0;
+      const curDomCount = historyEl ? historyEl.querySelectorAll(SEL_ITEM).length : 0;
 
       if(curDomCount === prevDomCount) {
         stableRounds++;
@@ -361,9 +350,10 @@
 
       setProgress(`Шаг ${i}/${effectiveMaxScrolls} | WS: ${wsMessages.size} | DOM: ${curDomCount}`);
 
-      if(!useDateRange && stableRounds >= 12) break;
-      if(useDateRange && stableRounds >= 20) break;
+      if(stableRounds >= maxStable) break;
     }
+
+    _trackMinTime = false;
 
     await sleep(1000);
 
