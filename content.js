@@ -422,7 +422,9 @@
     }));
 
     try {
-      const ts = new Date().toISOString().replace(/[:.]/g,'-');
+      const now = new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+      const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
       const chunkSize = (paginationEnabled && paginationRows > 0) ? paginationRows : out.length;
       const totalParts = Math.ceil(out.length / chunkSize);
 
