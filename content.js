@@ -109,7 +109,13 @@
     if (!pending) return;
     sessionStorage.removeItem('max_export_pending');
 
-    const params = JSON.parse(pending);
+    let params;
+    try {
+      params = JSON.parse(pending);
+    } catch(e) {
+      setProgress('Ошибка: повреждённые данные экспорта');
+      return;
+    }
 
     (async () => {
       const panel = ensurePanel();
