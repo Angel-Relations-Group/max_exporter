@@ -188,8 +188,8 @@
       // <img> may be lazy/unloaded, so don't require it to be present.
       return 'Фото';
     }
-    if (content.querySelector('.attaches')) {
-      const attaches = content.querySelector('.attaches');
+    const attaches = content.querySelector('.attaches');
+    if (attaches) {
       // Audio (voice/music) attachments live in .attachAudio inside .attaches,
       // NOT in .media — detect them before falling back to a generic "Файл".
       if (attaches.querySelector('.attachAudio')) {
@@ -732,7 +732,7 @@
   }
 
   async function doExport(params) {
-    const {maxScrolls, delayMs, format, startDate, endDate, startDateSet, endDateSet, paginationEnabled, paginationRows} = params;
+    const {maxScrolls, format, startDate, endDate, startDateSet, endDateSet, paginationEnabled, paginationRows} = params;
 
     if(!validateRequiredElements()){
       setProgress('Ошибка: не найдены элементы чата на странице');
@@ -774,7 +774,7 @@
       if(SHOULD_STOP) break;
 
       scrollChatToTop();
-      await sleep(delayMs || 500);
+      await sleep(350);
 
       if(useDateRange) {
         const oldest = getOldestVisibleDateMs();
