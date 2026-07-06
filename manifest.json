@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "MAX Channel Exporter",
-  "version": "1.5.2",
+  "version": "1.6.2",
   "description": "Экспорт постов из каналов мессенджера MAX в CSV или JSON.",
   "permissions": [
     "activeTab",
@@ -12,9 +12,19 @@
     "https://max.ru/*",
     "https://web.max.ru/*"
   ],
+  "icons": {
+    "16": "ico.png",
+    "48": "ico.png",
+    "128": "ico.png"
+  },
   "action": {
     "default_title": "Export MAX posts",
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "ico.png",
+      "48": "ico.png",
+      "128": "ico.png"
+    }
   },
   "background": {
     "service_worker": "background.js"
@@ -32,6 +42,17 @@
         "content.css"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://max.ru/*",
+        "https://web.max.ru/*"
+      ],
+      "js": [
+        "main-inject.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
     }
   ]
 }
