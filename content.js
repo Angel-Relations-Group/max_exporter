@@ -8,7 +8,6 @@
   const SEL_HISTORY = 'div.history';
   const SEL_ITEM = 'div.item';
   const SEL_BUBBLE = 'div.bubble';
-  const SEL_TEXT = 'span.text';
 
   let RUNNING = false;
   let SHOULD_STOP = false;
@@ -27,20 +26,10 @@
   }
 
   window.addEventListener('popstate', resetOnNavigate);
-  const _origPushState = history.pushState;
-  history.pushState = function() {
-    _origPushState.apply(this, arguments);
-    resetOnNavigate();
-  };
-  const _origReplaceState = history.replaceState;
-  history.replaceState = function() {
-    _origReplaceState.apply(this, arguments);
-    resetOnNavigate();
-  };
 
   const _linkByClean = new Map();   // identityKey -> post link (progress counter)
   const _linkByBubble = new WeakMap(); // bubble element -> post link (primary identity)
-  var _capturedLink = null;
+  let _capturedLink = null;
 
   // Listen for captured links from main-inject.js (clipboard interception)
   window.addEventListener('message', function(e) {
@@ -55,20 +44,16 @@
   // (they don't auto-dismiss quickly), and removing a node makes the app re-render it
   // from its internal queue. So suppression = CSS hiding + CONTINUOUS node removal via
   // a MutationObserver, kept active until the app's snackbar queue has drained.
-  var _toastHider = null;
-  var _toastSuppressing = false;
-  var _snackbarObserver = null;
-  var _lastSnackbarSeen = 0;
+  let _toastHider = null;
+  let _toastSuppressing = false;
+  let _snackbarObserver = null;
   const _snackbarSel = '.snackbar, [class*="snackbar"]';
 
   function _removeSnackbars() {
-    const nodes = document.querySelectorAll(_snackbarSel);
-    if (nodes.length) _lastSnackbarSeen = Date.now();
-    nodes.forEach(el => { try { el.remove(); } catch(e){} });
+    document.querySelectorAll(_snackbarSel).forEach(el => { try { el.remove(); } catch(e){} });
   }
   function _startSnackbarObserver() {
     if (_snackbarObserver) return;
-    _lastSnackbarSeen = Date.now();
     _snackbarObserver = new MutationObserver(() => {
       if (_toastSuppressing) _removeSnackbars();
     });
@@ -87,6 +72,14 @@
     }
     _removeSnackbars();
     _startSnackbarObserver();
+  }
+
+  function stopToastSuppression() {
+    _toastSuppressing = false;
+    if (_snackbarObserver) {
+      try { _snackbarObserver.disconnect(); } catch(e) {}
+      _snackbarObserver = null;
+    }
   }
 
   // Collect links for all currently visible messages via the context menu
@@ -196,6 +189,17 @@
       return 'Фото';
     }
     if (content.querySelector('.attaches')) {
+      const attaches = content.querySelector('.attaches');
+      // Audio (voice/music) attachments live in .attachAudio inside .attaches,
+      // NOT in .media — detect them before falling back to a generic "Файл".
+      if (attaches.querySelector('.attachAudio')) {
+        const n = getMediaFileName(content);
+        return n ? 'Аудио: ' + n : 'Аудио';
+      }
+      if (attaches.querySelector('.attachVideo, video')) {
+        const n = getMediaFileName(content);
+        return n ? 'Видео: ' + n : 'Видео';
+      }
       const n = getMediaFileName(content);
       return n ? 'Файл: ' + n : 'Файл';
     }
@@ -265,7 +269,7 @@
     return token ? dc + '|' + token.substring(0, 120) : dc;
   }
 
-  // Extract the text from a bubble element (same logic as collectDomMessages)
+  // Extract the text from a bubble element (used by collectDomMessages)
   function extractBubbleText(bubble) {
     const content = bubble.querySelector('.bubbleContent') || bubble;
     // The caption is a direct child span.text of bubbleContent. If absent the
@@ -323,7 +327,7 @@
     return link;
   }
 
-  async function findChannelSlug() {
+  function findChannelSlug() {
     resetOnNavigate();
     if (_resolvedSlug) return _resolvedSlug;
 
@@ -337,10 +341,40 @@
       if (stored[urlSlug]) { _resolvedSlug = stored[urlSlug]; return stored[urlSlug]; }
     } catch(e) {}
 
-    // Fallback: numeric ID (post links in the report come from the posts
-    // themselves via clipboard capture, so the slug only affects the filename).
+    // Most reliable fallback: the canonical channel slug is embedded in every
+    // captured post link (e.g. https://max.ru/kavkaz_tass/AZ8bx1QhPyo). Internal
+    // SPA navigation / server redirects can load a channel directly at its numeric
+    // ID, leaving the sessionStorage map above empty — but post links always carry
+    // the slug. Cache the result back into sessionStorage for future exports.
+    const slugFromLink = _slugFromCapturedLinks();
+    if (slugFromLink) {
+      _resolvedSlug = slugFromLink;
+      try {
+        const map = JSON.parse(sessionStorage.getItem('_maxExportSlugMap') || '{}');
+        map[urlSlug] = slugFromLink;
+        sessionStorage.setItem('_maxExportSlugMap', JSON.stringify(map));
+      } catch(e) {}
+      return slugFromLink;
+    }
+
+    // Final fallback: numeric ID (post links in the report still come from the
+    // posts themselves via clipboard capture, so this only affects the filename).
     _resolvedSlug = urlSlug;
     return urlSlug;
+  }
+
+  // Extract a non-numeric channel slug from any captured post link. MAX exposes
+  // links as https://max.ru/<slug>/<postId>; the slug segment is the canonical
+  // username. Returns null when no usable link has been captured yet.
+  function _slugFromCapturedLinks() {
+    const links = [];
+    _linkByClean.forEach(l => links.push(l));
+    for (const link of links) {
+      if (typeof link !== 'string') continue;
+      const m = link.match(/max\.ru\/([a-zA-Z][a-zA-Z0-9_]{1,31})(?:[/?#]|$)/);
+      if (m && m[1]) return m[1];
+    }
+    return null;
   }
 
   (function checkPendingExport() {
@@ -600,9 +634,13 @@
   }
 
   function nodeTimeMs(node) {
-    // MAX displays message time inside a .meta element — check it first
-    const meta = node.querySelector('.meta');
-    if (meta) {
+    // MAX displays message time inside a .meta element. But media players
+    // (audio/video attachments, "кружки") ALSO contain a .meta showing the media
+    // DURATION, and that one appears BEFORE the message's real .meta in DOM
+    // order. Skip any .meta inside a media/attachment player, otherwise the
+    // audio duration (e.g. "01:10") is read as the message time of day.
+    for (const meta of node.querySelectorAll('.meta')) {
+      if (meta.closest('.media, .attaches, .attachAudio, .attachVideo, .attachDocument, .videoMessage, .audio, .video, .duration')) continue;
       const t = (meta.innerText || '').trim();
       const m = t.match(/(\d{1,2}):(\d{2})/);
       if (m) return parseTimeOfDay(m[0]);
@@ -664,14 +702,7 @@
       }
 
       bubbles.forEach(bubble => {
-        // The caption is a direct child span.text of bubbleContent. Other
-        // span.text elements live in .header (forward source), .link (preview)
-        // or .meta (views/time) and must be ignored. If no caption is present
-        // the bubble is media-only — fall back to the media type label.
-        const content = bubble.querySelector('.bubbleContent') || bubble;
-        const textEl = content.querySelector(':scope > span.text');
-        let text = textEl ? textEl.innerText : detectMediaType(bubble);
-        text = (text || '').replace(/\u00A0/g, ' ').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+        const text = extractBubbleText(bubble);
         if (text.length <= 2) return;
         const ctx = bubble.closest('.messageWrapper') || bubble.closest('.block') || bubble.closest('[class*="wrapper"]') || bubble;
 
@@ -680,7 +711,7 @@
         const time = curDateMs != null ? curDateMs + tod : 0;
 
         let reactions = 0;
-        ctx.querySelectorAll('.reaction .counter, .counter').forEach(c => {
+        ctx.querySelectorAll('.reaction .counter').forEach(c => {
           const n = parseInt((c.textContent || '').trim(), 10);
           if (!isNaN(n)) reactions += n;
         });
@@ -727,8 +758,6 @@
 
     const historyEl = document.querySelector(SEL_HISTORY);
 
-    setProgress(`Скролл... DOM сообщений: ${historyEl ? historyEl.querySelectorAll(SEL_ITEM).length : 0}`);
-
     // Скролл вниз, чтобы подгрузить самые свежие сообщения —
     // дальше цикл будет скроллить вверх, подгружая всё более старые.
     // Если в канале есть непрочитанные сообщения, MAX открывает его на первом
@@ -774,14 +803,16 @@
 
     await sleep(1000);
 
-    const slug = await findChannelSlug();
-
     const collected = collectDomMessages();
 
     // The post link is the only stable unique identifier (MAX exposes no message
     // id in the DOM, and caption-less media posts collide on text/media tokens).
     // Capture a link for every collected bubble before deduping.
     await fillMissingLinks(collected);
+
+    // Resolve the channel slug AFTER link collection: the canonical slug is
+    // embedded in the captured post links, so we need them populated first.
+    const slug = await findChannelSlug();
 
     const seen = new Set();
     let results = [];
@@ -813,6 +844,10 @@
     });
 
     try {
+      if (out.length === 0) {
+        setProgress('Нет сообщений за выбранный период.');
+        return;
+      }
       const now = new Date();
       const pad = (n) => String(n).padStart(2, '0');
       const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
@@ -836,18 +871,20 @@
       const partInfo = totalParts > 1 ? ` в ${totalParts} файлах (${chunkSize} строк/файл)` : '';
       setProgress(`Готово.
 ${format.toUpperCase()}: ${out.length} сообщений${partInfo}
-Файл должен был начать скачиваться.`);
+Сохранение файла запущено.`);
     } catch (e) {
       setProgress(`Ошибка скачивания:\n${e.message}`);
     } finally {
       RUNNING = false;
       ensurePanel().querySelector('#max-exporter-stop').style.display = 'none';
       ensurePanel().querySelector('#max-exporter-close-panel').style.display = 'block';
+      stopToastSuppression();
       // Reload to clear the app's in-memory snackbar queue. During the export we
       // triggered many "Copy link" actions, each enqueuing a snackbar; they are only
       // kept in JS memory, so a reload drops them all. The progress text is persisted
-      // and re-shown after the reload (see showLastResult). Toast suppression (CSS +
-      // observer) stays active until the actual navigation, so nothing leaks through.
+      // and re-shown after the reload (see showLastResult). The MutationObserver is
+      // now disconnected (no more copies to handle); the CSS hider remains until the
+      // reload so queued snackbars don't flash.
       try {
         sessionStorage.setItem('max_export_result', JSON.stringify({
           text: ensurePanel().querySelector('#max-exporter-progress').textContent
