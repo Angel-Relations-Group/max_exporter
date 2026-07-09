@@ -505,20 +505,16 @@
     return '\uFEFF' + lines.join('\r\n');
   }
 
-  function downloadViaBackground(blob, filename){
-    return new Promise((resolve, reject) => {
-      const url = URL.createObjectURL(blob);
-      chrome.runtime.sendMessage({type:'MAX_EXPORT_DOWNLOAD', url, filename}, (resp) => {
-        URL.revokeObjectURL(url);
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-        } else if (!resp?.ok) {
-          reject(new Error(resp?.error || 'Download failed'));
-        } else {
-          resolve(resp);
-        }
-      });
-    });
+  function downloadFile(blob, filename){
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return Promise.resolve();
   }
 
   function validateRequiredElements(){
@@ -860,11 +856,11 @@
 
         if(format === 'json'){
           const blob = new Blob([JSON.stringify(chunk, null, 2)], {type:'application/json'});
-          await downloadViaBackground(blob, `max_${slug}_${ts}${suffix}.json`);
+          await downloadFile(blob, `max_${slug}_${ts}${suffix}.json`);
         } else {
           const csv = toExcelCsv(chunk);
           const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
-          await downloadViaBackground(blob, `max_${slug}_${ts}${suffix}.csv`);
+          await downloadFile(blob, `max_${slug}_${ts}${suffix}.csv`);
         }
       }
 

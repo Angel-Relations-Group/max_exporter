@@ -1,4 +1,4 @@
-name: Build Chrome extension zip
+name: Build extension zips
 
 on:
   push:
@@ -27,21 +27,21 @@ jobs:
           VERSION=$(jq -r '.version' manifest.json)
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Create zip archive
-        run: |
-          mkdir -p dist
-          zip -r dist/max_exporter.zip . \
-            -x ".git/*" \
-            -x ".github/*" \
-            -x "dist/*" \
-            -x "*.zip" \
-            -x "node_modules/*" \
-            -x ".DS_Store"
+      - name: Build per-browser manifests
+        run: node tools/build.mjs
+
+      - name: Create Chrome zip
+        run: cd dist/chrome && zip -r ../../max_exporter_chrome.zip .
+
+      - name: Create Firefox zip
+        run: cd dist/firefox && zip -r ../../max_exporter_firefox.zip .
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/max_exporter.zip
+          files: |
+            max_exporter_chrome.zip
+            max_exporter_firefox.zip
           tag_name: v${{ steps.version.outputs.VERSION }}
           generate_release_notes: true
         env:
