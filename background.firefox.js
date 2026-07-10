@@ -1,10 +1,10 @@
-// Background (Firefox event page): сохраняет файлы от имени расширения,
-// обходя per-site запрос "automatic downloads" от <a download> в контенте.
+// Background (Firefox event page): saves files on behalf of the extension,
+// bypassing the per-site "automatic downloads" prompt from <a download> in content.
 //
-// Event page умеет создавать object URL, а data: URL Firefox блокирует —
-// поэтому файл упаковывается в blob: URL, скачивание запускается через
-// chrome.downloads, а blob освобождается (revokeObjectURL) после
-// завершения/таймаута. Ответ возвращается асинхронно.
+// The event page can create object URLs, whereas Firefox blocks data: URLs —
+// therefore the file is packaged into a blob: URL, the download is triggered via
+// chrome.downloads, and the blob is released (revokeObjectURL) after
+// completion/timeout. The response is returned asynchronously.
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type !== 'MAX_EXPORT_DOWNLOAD') return false;
 
@@ -39,7 +39,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           onDone(delta.state.current);
         }
       };
-      const timer = setTimeout(() => onDone('timeout'), 30000); // страховка канала ответа
+      const timer = setTimeout(() => onDone('timeout'), 30000); // safety net for the response channel
       chrome.downloads.onChanged.addListener(onChange);
     })
     .catch(err => {
@@ -47,5 +47,5 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ ok: false, error: (err && err.message) || String(err) });
     });
 
-  return true; // ответ придёт асинхронно
+  return true; // response will arrive asynchronously
 });

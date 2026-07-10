@@ -138,11 +138,11 @@
   }
 
   // Determine the media type of a bubble that has no caption text.
-  // Looks at the attachment block: div.sticker => Стикер, div.videoMessage
-  // (round video / "кружок" rendered on a canvas) => Кружок, div.media
-  // (div.video/<video> => Видео, <audio>/.audio => Аудио, <img>/.image => Фото),
-  // or div.attaches => Файл. For audio/video/file the on-screen filename is
-  // appended after the type ("Файл: report.pdf"); stickers, circles and photos
+  // Looks at the attachment block: div.sticker => Sticker, div.videoMessage
+  // (round video / "circle" rendered on a canvas) => Circle, div.media
+  // (div.video/<video> => Video, <audio>/.audio => Audio, <img>/.image => Photo),
+  // or div.attaches => File. For audio/video/file the on-screen filename is
+  // appended after the type ("File: report.pdf"); stickers, circles and photos
   // expose no filename and stay type-only.
   // Extract the on-screen filename for an audio/video/file attachment. Returns ''
   // when none is exposed (photo grids, voice messages, stickers, circles and
@@ -189,7 +189,7 @@
     const attaches = content.querySelector('.attaches');
     if (attaches) {
       // Audio (voice/music) attachments live in .attachAudio inside .attaches,
-      // NOT in .media — detect them before falling back to a generic "Файл".
+      // NOT in .media — detect them before falling back to a generic "File".
       if (attaches.querySelector('.attachAudio')) return lbl('Аудио', getMediaFileName(content));
       if (attaches.querySelector('.attachVideo, video')) return lbl('Видео', getMediaFileName(content));
       return lbl('Файл', getMediaFileName(content));
@@ -199,13 +199,13 @@
     return '';
   }
 
-  // Unique identifier for a media attachment (poster for video, src for image/
-  // audio). Empty for text-only bubbles. Used to distinguish several media-only
-  // posts that share the same caption-less text ("Видео").
+  // Unique identifier for a media attachment (poster for video, src for image/audio).
+  // Empty for text-only bubbles. Used to distinguish several media-only posts that
+  // share the same caption-less text ("Video").
   function bubbleMediaToken(bubble) {
     const content = bubble.querySelector('.bubbleContent') || bubble;
     // Sticker: identify by its data-testid ("sticker-<id>") or image src so
-    // several sticker-only posts (which all read as text "Стикер") stay distinct.
+    // several sticker-only posts (which all read as text "Sticker") stay distinct.
     const sticker = content.querySelector('.sticker');
     if (sticker) {
       const btn = sticker.querySelector('[data-testid^="sticker-"], button[aria-label="Стикер"]') || sticker;
@@ -214,9 +214,9 @@
       const img = sticker.querySelector('img');
       if (img && img.getAttribute('src')) return 's:' + img.getAttribute('src');
     }
-    // Video message ("кружок"): rendered on a canvas, so there is no asset URL.
+    // Video message ("circle"): rendered on a canvas, so there is no asset URL.
     // Identify it by its duration (.time) + meta (views/time) so several such
-    // posts (which all read as text "Кружок") stay distinct.
+    // posts (which all read as text "Circle") stay distinct.
     const videoMessage = content.querySelector('.videoMessage');
     if (videoMessage) {
       const timeEl = videoMessage.querySelector('.time');
@@ -242,9 +242,9 @@
       const attaches = content.querySelector('.attaches');
       if (attaches) return 'f:' + (attaches.textContent || '').replace(/\s+/g, ' ').trim().substring(0, 120);
     }
-    // Caption-less media/file post whose asset isn't currently in the DOM (e.g.
-    // a photo scrolled out of view with its <img> unloaded). Fall back to the
-    // views/time meta so several such posts keep distinct identity keys.
+    // Caption-less media/file post whose asset isn't currently in the DOM
+    // (e.g. a photo scrolled out of view with its <img> unloaded). Fall back
+    // to the views/time meta so several such posts keep distinct identity keys.
     if (media || content.querySelector('.attaches')) {
       const meta = bubble.querySelector('.meta');
       if (meta) return 'm:' + (meta.textContent || '').replace(/\s+/g, ' ').trim().substring(0, 40);
@@ -253,7 +253,7 @@
   }
 
   // Identity key for deduplication and link association. Media-only posts would
-  // otherwise all collapse to the same cleanText (e.g. "видео"); appending the
+  // otherwise all collapse to the same cleanText (e.g. "video"); appending the
   // unique media token keeps them distinct.
   function identityKey(text, token) {
     const dc = cleanText(text);
@@ -290,7 +290,7 @@
   async function getLinkForBubble(bubble) {
     async function attempt() {
       _capturedLink = null;
-      dismissMenu();                       // clear any stale menu first
+      dismissMenu();  // clear any stale menu first
       await sleep(20);
       bubble.dispatchEvent(new MouseEvent('contextmenu', {bubbles: true, cancelable: true, button: 2, clientX: 200, clientY: 300}));
       const item = await waitFor(findCopyLinkItem, 15, 20);
@@ -316,10 +316,53 @@
     return link;
   }
 
+  // Read the open channel's display name from the chat header (top bar). The
+  // export filename always uses this title (e.g. "foo bar"), regardless of
+  // whether the channel has a text slug or only a numeric id. Returns null when
+  // no title element is found (e.g. header not yet rendered).
+  function getChannelTitleFromDom() {
+    const sels = [
+      '.headerWrapper .title',
+      '.header .content--left .title',
+      '.headerWrapper .name'
+    ];
+    for (const s of sels) {
+      const el = document.querySelector(s);
+      if (el) {
+        const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        if (t && t.length >= 2) return t;
+      }
+    }
+    return null;
+  }
+
+  // Make a free-form channel title safe to embed in a download filename across
+  // Windows/macOS/Linux. Any run of whitespace and/or filesystem-reserved
+  // characters is collapsed into a single underscore, so e.g. "foo bar "
+  // becomes "foo_bar". Unicode letters (e.g. Cyrillic) are preserved.
+  function sanitizeForFilename(name) {
+    let s = (name || '').replace(/[\u0000-\u001f]/g, '').trim();
+    s = s.replace(/[\s\u00A0\\/:*?"<>|]+/g, '_');
+    s = s.replace(/^_+|_+$/g, '');
+    if (!s) return '';
+    if (s.length > 80) s = s.substring(0, 80).replace(/_+$/g, '');
+    return s;
+  }
+
   function findChannelSlug() {
     resetOnNavigate();
     if (_resolvedSlug) return _resolvedSlug;
 
+    // The filename should always contain the channel's display name (e.g.
+    // "foo bar"), not the link slug. Prefer the title read from the chat
+    // header. This affects only the filename — links in the report still come
+    // from clipboard capture and keep their original form (slug or numeric
+    // /c/-<id>/).
+    const titleSlug = sanitizeForFilename(getChannelTitleFromDom() || '');
+    if (titleSlug) { _resolvedSlug = titleSlug; return titleSlug; }
+
+    // Fallbacks when the header title is not available (header not rendered
+    // during reload, etc.).
     const urlSlug = location.pathname.split('/').filter(Boolean)[0] || 'unknown';
     if (!/^-?\d+$/.test(urlSlug)) { _resolvedSlug = urlSlug; return urlSlug; }
 
@@ -330,11 +373,10 @@
       if (stored[urlSlug]) { _resolvedSlug = stored[urlSlug]; return stored[urlSlug]; }
     } catch(e) {}
 
-    // Most reliable fallback: the canonical channel slug is embedded in every
-    // captured post link (e.g. https://max.ru/kavkaz_tass/AZ8bx1QhPyo). Internal
-    // SPA navigation / server redirects can load a channel directly at its numeric
-    // ID, leaving the sessionStorage map above empty — but post links always carry
-    // the slug. Cache the result back into sessionStorage for future exports.
+    // The canonical channel slug is embedded in every captured post link as
+    // https://max.ru/<slug>/<postId>. Internal SPA navigation / server redirects
+    // can load a channel directly at its numeric ID, leaving the sessionStorage
+    // map above empty — but post links always carry the slug.
     const slugFromLink = _slugFromCapturedLinks();
     if (slugFromLink) {
       _resolvedSlug = slugFromLink;
@@ -415,9 +457,9 @@
   })();
 
   // After an export finishes we reload the page to clear the app's in-memory
-  // snackbar queue (the copies during link collection enqueue many "Вы скопировали
-  // ссылку на пост" notifications). The completion message is persisted here and
-  // shown again after the reload.
+  // snackbar queue (the copies during link collection enqueue many "You copied
+  // the link to the post" notifications). The completion message is persisted
+  // here and shown again after the reload.
   (function showLastResult() {
     const stored = sessionStorage.getItem('max_export_result');
     if (!stored) return;
@@ -514,13 +556,9 @@
     return '\uFEFF' + lines.join('\r\n');
   }
 
-  // Сохранение через chrome.downloads в фоне расширения. Контент-скрипт,
-  // кликающий по <a download>, работает в контексте страницы max.ru — поэтому
-  // несколько файлов подряд вызывали пер-сайт запрос "automatic downloads".
-  // Через API расширения запроса нет, а скачивания переживают перезагрузку
-  // страницы. Ответ и chrome.runtime.lastError проверяем явно, иначе любая
-  // ошибка (например, не загружен фон) проходит молча. Сырой текст шлём как
-  // есть — blob создаётся уже в фоне (data: URL Firefox блокирует).
+  // Sends the file content to the background, which builds a blob and saves it
+  // via chrome.downloads. Resolves with the background response, or an error
+  // from chrome.runtime.lastError / a missing response.
   function downloadFile(content, filename, mime){
     return new Promise((resolve) => {
       chrome.runtime.sendMessage(
@@ -639,9 +677,9 @@
 
   function nodeTimeMs(node) {
     // MAX displays message time inside a .meta element. But media players
-    // (audio/video attachments, "кружки") ALSO contain a .meta showing the media
-    // DURATION, and that one appears BEFORE the message's real .meta in DOM
-    // order. Skip any .meta inside a media/attachment player, otherwise the
+    // (audio/video attachments, "circles") ALSO contain a .meta showing the media DURATION,
+    // and that one appears BEFORE the message's real .meta in DOM order.
+    // Skip any .meta inside a media/attachment player, otherwise the
     // audio duration (e.g. "01:10") is read as the message time of day.
     for (const meta of node.querySelectorAll('.meta')) {
       if (meta.closest('.media, .attaches, .attachAudio, .attachVideo, .attachDocument, .videoMessage, .audio, .video, .duration')) continue;
@@ -741,7 +779,7 @@
 
     SHOULD_STOP = false;
 
-    // Suppress "Вы скопировали ссылку на пост" snackbars for the whole export.
+    // Suppress "You copied the link to the post" snackbars for the whole export.
     // Link collection triggers many copies; without this the snackbars stack up.
     hideToasts();
 
@@ -758,11 +796,11 @@
 
     const historyEl = document.querySelector(SEL_HISTORY);
 
-    // Скролл вниз, чтобы подгрузить самые свежие сообщения —
-    // дальше цикл будет скроллить вверх, подгружая всё более старые.
-    // Если в канале есть непрочитанные сообщения, MAX открывает его на первом
-    // непрочитанном, и самые новые сообщения могут быть ещё не подгружены.
-    // Принудительно доходим до самого свежего сообщения и ждём стабилизации.
+    // Scroll down to load the most recent messages — the loop will then scroll
+    // upward, loading progressively older ones. If the channel has unread
+    // messages, MAX opens it at the first unread one, so the newest messages may
+    // not be loaded yet. Force-scroll to the very latest message and wait for
+    // stabilization.
     setProgress(`Загрузка свежих сообщений... DOM: ${historyEl ? historyEl.querySelectorAll(SEL_ITEM).length : 0}`);
     await scrollToNewestMessages();
 

@@ -23,7 +23,6 @@
   } catch(e) {}
 
   // ---- URL slug capture ----
-  // The SPA replaces slug URLs (/nauka_tass) with numeric IDs (/-69242250524144).
   // Capture the slug at document_start (before SPA) and via History API interception,
   // then store a chId→slug mapping in sessionStorage so it survives page reloads.
   let _pendingSlug = null;

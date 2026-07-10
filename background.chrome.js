@@ -1,9 +1,9 @@
-// Background (Chrome MV3 service worker): сохраняет файлы от имени расширения,
-// обходя per-site запрос "automatic downloads" от <a download> в контенте.
+// Background (Chrome MV3 service worker): saves files on behalf of the extension,
+// bypassing the per-site "automatic downloads" prompt from <a download> in content.
 //
-// Service worker не умеет создавать object URL, поэтому файл упаковывается
-// в data: URL (base64), а скачивание запускается через chrome.downloads.
-// Ответ возвращается асинхронно после завершения/таймаута.
+// The service worker cannot create object URLs, therefore the file is packaged
+// into a data: URL (base64), and the download is triggered via chrome.downloads.
+// The response is returned asynchronously after completion/timeout.
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type !== 'MAX_EXPORT_DOWNLOAD') return false;
 
@@ -14,7 +14,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   const mime = (msg.mime || 'text/plain').replace(/;\s*$/, '');
 
-  // SW: TextEncoder -> binary string -> base64 (чанками, без переполнения стека)
+  // SW: TextEncoder -> binary string -> base64 (in chunks, avoiding stack overflow)
   function buildUrl() {
     const bytes = new TextEncoder().encode(msg.content);
     let bin = '';
@@ -40,16 +40,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: state === 'complete', id, state });
       };
       const onChange = (delta) => {
-        if (delta.id === id && delta.state?.current !== 'in_progress') {
-          onDone(delta.state.current);
-        }
+        if (delta.id !== id || !delta.state) return;
+        const s = delta.state.current;
+        if (s === 'complete' || s === 'interrupted') onDone(s);
       };
-      const timer = setTimeout(() => onDone('timeout'), 30000); // страховка канала ответа
+      const timer = setTimeout(() => onDone('timeout'), 30000); // safety net for the response channel
       chrome.downloads.onChanged.addListener(onChange);
     })
     .catch(err => {
       sendResponse({ ok: false, error: (err && err.message) || String(err) });
     });
 
-  return true; // ответ придёт асинхронно
+  return true; // response will arrive asynchronously
 });
