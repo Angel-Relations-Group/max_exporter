@@ -425,7 +425,7 @@
       const panel = ensurePanel();
       panel.style.display = 'block';
       panel.querySelector('#max-exporter-stop').style.display = 'block';
-      setProgress('Перезагрузка... ожидание загрузки чата...');
+      setProgress('Перезагрузка... Ожидание загрузки чата...');
 
       for (let i = 0; i < 60; i++) {
         await sleep(1000);
@@ -439,7 +439,7 @@
         await sleep(1000);
         const hist = document.querySelector(SEL_HISTORY);
         const domCount = hist ? hist.querySelectorAll(SEL_ITEM).length : 0;
-        setProgress(`Ожидание загрузки... сообщений в DOM: ${domCount}`);
+        setProgress(`Ожидание загрузки... Сообщений: ${domCount}`);
         if (domCount === prevDom) {
           stable++;
         } else {
@@ -801,11 +801,11 @@
     // messages, MAX opens it at the first unread one, so the newest messages may
     // not be loaded yet. Force-scroll to the very latest message and wait for
     // stabilization.
-    setProgress(`Загрузка свежих сообщений... DOM: ${historyEl ? historyEl.querySelectorAll(SEL_ITEM).length : 0}`);
+    setProgress(`Загрузка свежих сообщений: ${historyEl ? historyEl.querySelectorAll(SEL_ITEM).length : 0}`);
     await scrollToNewestMessages();
 
     // Collect links for initially visible messages
-    setProgress(`Сбор ссылок... DOM: ${historyEl ? historyEl.querySelectorAll(SEL_ITEM).length : 0}`);
+    setProgress(`Сбор ссылок: ${historyEl ? historyEl.querySelectorAll(SEL_ITEM).length : 0}`);
     await collectLinksForVisible();
 
     for(let i = 1; i <= effectiveMaxScrolls; i++){
@@ -817,7 +817,7 @@
       if(useDateRange) {
         const oldest = getOldestVisibleDateMs();
         if(oldest < Infinity && oldest < startMs) {
-          setProgress(`Дата начала достигнута. DOM: ${historyEl ? historyEl.querySelectorAll(SEL_ITEM).length : 0}`);
+          setProgress(`Дата начала достигнута. Сообщений: ${historyEl ? historyEl.querySelectorAll(SEL_ITEM).length : 0}`);
           break;
         }
       }
@@ -831,7 +831,7 @@
         prevDomCount = curDomCount;
       }
 
-      setProgress(`Шаг ${i}/${effectiveMaxScrolls} | DOM: ${curDomCount} | Ссылок: ${_linkByClean.size}`);
+      setProgress(`Шаг ${i}/${effectiveMaxScrolls} | Сообщений: ${curDomCount} | Ссылок: ${_linkByClean.size}`);
 
       // Collect links for newly visible messages
       await collectLinksForVisible();
@@ -918,7 +918,7 @@
         const partInfo = totalParts > 1 ? ` в ${totalParts} файлах (${chunkSize} строк/файл)` : '';
         setProgress(`Готово.
 ${format.toUpperCase()}: ${out.length} сообщений${partInfo}
-Сохранение файла запущено.`);
+Файлы сохранены в папке по умолчанию.`);
       }
     } catch (e) {
       setProgress(`Ошибка скачивания:\n${e.message}`);
