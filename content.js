@@ -13,6 +13,10 @@
   let SHOULD_STOP = false;
 
   function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
+  // Poll a predicate: sleep(step), then check, up to `tries` times. Returns the
+  // first truthy value (or null). Replaces manual polling loops.
+  async function waitFor(pred, step, tries){ for(let i=0;i<tries;i++){ await sleep(step); const v=pred(); if(v) return v; } return null; }
+  const pad = (n)=>String(n).padStart(2,'0');
 
   let _resolvedSlug = null;
   let _lastPathname = location.pathname;
@@ -82,56 +86,54 @@
     }
   }
 
+  // Store a captured post link under both identity maps. The post link is the only
+  // stable unique id; text/media tokens can collide, so it is the dedup key.
+  function storeLink(bubble, link, text, token) {
+    _linkByBubble.set(bubble, link);
+    const dc = identityKey(text, token);
+    if (!_linkByClean.has(dc)) _linkByClean.set(dc, link);
+  }
+
+  // Capture a link for one bubble via the context menu (skips already-captured).
+  // Returns true on success.
+  async function captureLinkForBubble(bubble, text, token) {
+    if (_linkByBubble.has(bubble)) return true;
+    const link = await getLinkForBubble(bubble);
+    if (link) { storeLink(bubble, link, text, token); return true; }
+    return false;
+  }
+
   // Collect links for all currently visible messages via the context menu
   // "Copy link to post" (captured through the patched clipboard.writeText).
   async function collectLinksForVisible() {
     const hist = document.querySelector(SEL_HISTORY);
     if (!hist) return;
-    const bubbles = hist.querySelectorAll(SEL_BUBBLE);
-    const missed = [];
-
-    for (const bubble of bubbles) {
-      if (SHOULD_STOP) break;
+    const todo = [];
+    for (const bubble of hist.querySelectorAll(SEL_BUBBLE)) {
+      if (_linkByBubble.has(bubble)) continue;
       const text = extractBubbleText(bubble);
       if (text.length <= 2) continue;
-      if (_linkByBubble.has(bubble)) continue;
-      const link = await getLinkForBubble(bubble);
-      if (link) {
-        _linkByBubble.set(bubble, link);
-        const dc = identityKey(text, bubbleMediaToken(bubble));
-        if (!_linkByClean.has(dc)) _linkByClean.set(dc, link);
-      } else {
-        missed.push({ bubble });
-      }
+      todo.push({ bubble, text, token: bubbleMediaToken(bubble) });
     }
-
-    // Second pass for bubbles whose capture raced on the first attempt.
-    for (const { bubble } of missed) {
+    // First pass; retry once for bubbles whose capture raced.
+    const missed = [];
+    for (const m of todo) {
       if (SHOULD_STOP) break;
-      if (_linkByBubble.has(bubble)) continue;
-      const link = await getLinkForBubble(bubble);
-      if (link) {
-        _linkByBubble.set(bubble, link);
-        const dc = identityKey(extractBubbleText(bubble), bubbleMediaToken(bubble));
-        if (!_linkByClean.has(dc)) _linkByClean.set(dc, link);
-      }
+      if (!await captureLinkForBubble(m.bubble, m.text, m.token)) missed.push(m);
+    }
+    for (const m of missed) {
+      if (SHOULD_STOP) break;
+      await captureLinkForBubble(m.bubble, m.text, m.token);
     }
   }
 
-  // Capture links for collected messages that are still missing one. Called after the
-  // scroll loop, when the DOM holds the final set of messages. Each result keeps a
-  // reference to its bubble, so we capture a link directly per bubble (the post link
-  // is the only stable unique id — text/media tokens can collide).
+  // Capture links for collected messages that are still missing one. Called after
+  // the scroll loop, when the DOM holds the final set of messages.
   async function fillMissingLinks(results) {
     for (const m of results) {
       if (SHOULD_STOP) break;
-      if (!m.bubble || _linkByBubble.has(m.bubble)) continue;
-      const link = await getLinkForBubble(m.bubble);
-      if (link) {
-        _linkByBubble.set(m.bubble, link);
-        const dc = identityKey(m.text, m.token);
-        if (!_linkByClean.has(dc)) _linkByClean.set(dc, link);
-      }
+      if (!m.bubble) continue;
+      await captureLinkForBubble(m.bubble, m.text, m.token);
     }
   }
 
@@ -172,18 +174,14 @@
     return '';
   }
 
+  function lbl(type, n){ return n ? type + ': ' + n : type; }
+
   function detectMediaType(bubble) {
     const content = bubble.querySelector('.bubbleContent') || bubble;
     const media = content.querySelector('.media');
     if (media) {
-      if (media.querySelector('.video, video')) {
-        const n = getMediaFileName(content);
-        return n ? 'Видео: ' + n : 'Видео';
-      }
-      if (media.querySelector('audio, .audio, .voice, .music')) {
-        const n = getMediaFileName(content);
-        return n ? 'Аудио: ' + n : 'Аудио';
-      }
+      if (media.querySelector('.video, video')) return lbl('Видео', getMediaFileName(content));
+      if (media.querySelector('audio, .audio, .voice, .music')) return lbl('Аудио', getMediaFileName(content));
       // A .media block that is neither video nor audio is a photo grid. The
       // <img> may be lazy/unloaded, so don't require it to be present.
       return 'Фото';
@@ -192,16 +190,9 @@
     if (attaches) {
       // Audio (voice/music) attachments live in .attachAudio inside .attaches,
       // NOT in .media — detect them before falling back to a generic "Файл".
-      if (attaches.querySelector('.attachAudio')) {
-        const n = getMediaFileName(content);
-        return n ? 'Аудио: ' + n : 'Аудио';
-      }
-      if (attaches.querySelector('.attachVideo, video')) {
-        const n = getMediaFileName(content);
-        return n ? 'Видео: ' + n : 'Видео';
-      }
-      const n = getMediaFileName(content);
-      return n ? 'Файл: ' + n : 'Файл';
+      if (attaches.querySelector('.attachAudio')) return lbl('Аудио', getMediaFileName(content));
+      if (attaches.querySelector('.attachVideo, video')) return lbl('Видео', getMediaFileName(content));
+      return lbl('Файл', getMediaFileName(content));
     }
     if (content.querySelector('.sticker')) return 'Стикер';
     if (content.querySelector('.videoMessage')) return 'Кружок';
@@ -302,12 +293,10 @@
       dismissMenu();                       // clear any stale menu first
       await sleep(20);
       bubble.dispatchEvent(new MouseEvent('contextmenu', {bubbles: true, cancelable: true, button: 2, clientX: 200, clientY: 300}));
-      let item = null;
-      for (let w = 0; w < 20 && !item; w++) { await sleep(15); item = findCopyLinkItem(); }
+      const item = await waitFor(findCopyLinkItem, 15, 20);
       if (!item) return null;
       item.click();
-      for (let w = 0; w < 30 && !_capturedLink; w++) await sleep(15);  // wait for clipboard capture
-      const link = _capturedLink;
+      const link = await waitFor(()=>_capturedLink, 15, 30);  // wait for clipboard capture
       _capturedLink = null;
       return link;
     }
@@ -420,7 +409,7 @@
       RUNNING = true;
       doExport(params).catch(e => {
         setProgress('Ошибка: ' + e.message);
-        RUNNING = false;
+        finalizeExport();
       });
     })();
   })();
@@ -463,6 +452,31 @@
     ensurePanel().querySelector('#max-exporter-progress').textContent = t;
   }
 
+  // Mark the panel as finished: stop button hidden, close button shown, RUNNING
+  // cleared so a new export can start. Used on every exit path (validation
+  // failure, errors, success) so the user is never stuck with RUNNING == true.
+  function markPanelFinished(){
+    RUNNING = false;
+    const panel = ensurePanel();
+    panel.querySelector('#max-exporter-stop').style.display = 'none';
+    panel.querySelector('#max-exporter-close-panel').style.display = 'block';
+  }
+
+  // Full teardown after an export that actually ran (links were collected, so
+  // snackbar suppression is active): disconnect the snackbar observer, persist the
+  // final progress text for re-display after reload, then reload to drop the
+  // app's in-memory snackbar queue.
+  function finalizeExport(){
+    markPanelFinished();
+    stopToastSuppression();
+    try {
+      sessionStorage.setItem('max_export_result', JSON.stringify({
+        text: ensurePanel().querySelector('#max-exporter-progress').textContent
+      }));
+    } catch(e) {}
+    location.reload();
+  }
+
   function parseInputDate(dateStr) {
     if (!dateStr) return null;
     const parts = dateStr.split('-');
@@ -475,12 +489,7 @@
   function formatTime(epochMs) {
     if (!epochMs) return '';
     const d = new Date(epochMs);
-    const day = String(d.getDate()).padStart(2, '0');
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const year = d.getFullYear();
-    const hours = String(d.getHours()).padStart(2, '0');
-    const minutes = String(d.getMinutes()).padStart(2, '0');
-    return `${day}.${month}.${year} ${hours}:${minutes}`;
+    return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   }
 
   function csvSafe(v){
@@ -505,16 +514,24 @@
     return '\uFEFF' + lines.join('\r\n');
   }
 
-  function downloadFile(blob, filename){
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    return Promise.resolve();
+  // Сохранение через chrome.downloads в фоне расширения. Контент-скрипт,
+  // кликающий по <a download>, работает в контексте страницы max.ru — поэтому
+  // несколько файлов подряд вызывали пер-сайт запрос "automatic downloads".
+  // Через API расширения запроса нет, а скачивания переживают перезагрузку
+  // страницы. Ответ и chrome.runtime.lastError проверяем явно, иначе любая
+  // ошибка (например, не загружен фон) проходит молча. Сырой текст шлём как
+  // есть — blob создаётся уже в фоне (data: URL Firefox блокирует).
+  function downloadFile(content, filename, mime){
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage(
+        { type: 'MAX_EXPORT_DOWNLOAD', content, filename, mime },
+        (resp) => {
+          const err = chrome.runtime.lastError;
+          if (err) resolve({ ok: false, error: err.message });
+          else resolve(resp || { ok: false, error: 'нет ответа от фоновой службы (перезагрузите расширение)' });
+        }
+      );
+    });
   }
 
   function validateRequiredElements(){
@@ -535,20 +552,11 @@
     return null;
   }
 
-  function scrollChatToTop() {
-    const scrollable = getScrollable();
-    if (scrollable) {
-      scrollable.scrollTop = 0;
-      scrollable.dispatchEvent(new Event('scroll', { bubbles: true }));
-    }
-  }
-
-  function scrollChatToBottom() {
-    const scrollable = getScrollable();
-    if (scrollable) {
-      scrollable.scrollTop = scrollable.scrollHeight;
-      scrollable.dispatchEvent(new Event('scroll', { bubbles: true }));
-    }
+  function scrollChat(position) {
+    const el = getScrollable();
+    if (!el) return;
+    el.scrollTop = position === 'top' ? 0 : el.scrollHeight;
+    el.dispatchEvent(new Event('scroll', { bubbles: true }));
   }
 
   // Robustly scroll the channel to its very newest message and wait until the DOM
@@ -573,7 +581,7 @@
     for (let i = 0; i < 80; i++) {
       const btn = findJumpToLatestButton();
       if (btn) { try { btn.click(); } catch(e){} }
-      scrollChatToBottom();
+      scrollChat('bottom');
       await sleep(350);
 
       const cur = domCount();
@@ -588,9 +596,9 @@
     }
 
     // Final settle: ensure we're pinned to the absolute bottom.
-    scrollChatToBottom();
+    scrollChat('bottom');
     await sleep(400);
-    scrollChatToBottom();
+    scrollChat('bottom');
   }
 
   const EXCLUDE_EXACT = ['трансляция началась', 'трансляция закончилась'];
@@ -703,7 +711,7 @@
         const ctx = bubble.closest('.messageWrapper') || bubble.closest('.block') || bubble.closest('[class*="wrapper"]') || bubble;
 
         // Search for time in the widest context (the item element) to find HH:MM
-        const tod = nodeTimeMs(item) || nodeTimeMs(ctx);
+        const tod = nodeTimeMs(item);
         const time = curDateMs != null ? curDateMs + tod : 0;
 
         let reactions = 0;
@@ -722,16 +730,12 @@
     return out;
   }
 
-  function exportPosts(params) {
-    sessionStorage.setItem('max_export_pending', JSON.stringify(params));
-    location.reload();
-  }
-
   async function doExport(params) {
     const {maxScrolls, format, startDate, endDate, startDateSet, endDateSet, paginationEnabled, paginationRows} = params;
 
     if(!validateRequiredElements()){
       setProgress('Ошибка: не найдены элементы чата на странице');
+      markPanelFinished();
       return;
     }
 
@@ -769,7 +773,7 @@
     for(let i = 1; i <= effectiveMaxScrolls; i++){
       if(SHOULD_STOP) break;
 
-      scrollChatToTop();
+      scrollChat('top');
       await sleep(350);
 
       if(useDateRange) {
@@ -845,48 +849,49 @@
         return;
       }
       const now = new Date();
-      const pad = (n) => String(n).padStart(2, '0');
       const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
       const chunkSize = (paginationEnabled && paginationRows > 0) ? paginationRows : out.length;
       const totalParts = Math.ceil(out.length / chunkSize);
 
+      let downloadErrors = [];
       for (let part = 0; part < totalParts; part++) {
+        if (SHOULD_STOP) break;
         const chunk = out.slice(part * chunkSize, (part + 1) * chunkSize);
         const suffix = totalParts > 1 ? `_part${part + 1}of${totalParts}` : '';
 
-        if(format === 'json'){
-          const blob = new Blob([JSON.stringify(chunk, null, 2)], {type:'application/json'});
-          await downloadFile(blob, `max_${slug}_${ts}${suffix}.json`);
-        } else {
-          const csv = toExcelCsv(chunk);
-          const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
-          await downloadFile(blob, `max_${slug}_${ts}${suffix}.csv`);
+        setProgress(`Сохранение файла ${part + 1} из ${totalParts}...`);
+
+        const content = format === 'json' ? JSON.stringify(chunk, null, 2) : toExcelCsv(chunk);
+        const filename = format === 'json'
+          ? `max_${slug}_${ts}${suffix}.json`
+          : `max_${slug}_${ts}${suffix}.csv`;
+        const mime = format === 'json' ? 'application/json' : 'text/csv;charset=utf-8;';
+
+        const resp = await downloadFile(content, filename, mime);
+        if (!resp || !resp.ok) {
+          const detail = (resp && resp.error) || 'неизвестная ошибка';
+          downloadErrors.push(`Файл ${part + 1}: ${detail}`);
         }
       }
 
-      const partInfo = totalParts > 1 ? ` в ${totalParts} файлах (${chunkSize} строк/файл)` : '';
-      setProgress(`Готово.
+      if (downloadErrors.length) {
+        setProgress(`Ошибки скачивания:\n${downloadErrors.join('\n')}`);
+      } else {
+        const partInfo = totalParts > 1 ? ` в ${totalParts} файлах (${chunkSize} строк/файл)` : '';
+        setProgress(`Готово.
 ${format.toUpperCase()}: ${out.length} сообщений${partInfo}
 Сохранение файла запущено.`);
+      }
     } catch (e) {
       setProgress(`Ошибка скачивания:\n${e.message}`);
     } finally {
-      RUNNING = false;
-      ensurePanel().querySelector('#max-exporter-stop').style.display = 'none';
-      ensurePanel().querySelector('#max-exporter-close-panel').style.display = 'block';
-      stopToastSuppression();
       // Reload to clear the app's in-memory snackbar queue. During the export we
       // triggered many "Copy link" actions, each enqueuing a snackbar; they are only
       // kept in JS memory, so a reload drops them all. The progress text is persisted
       // and re-shown after the reload (see showLastResult). The MutationObserver is
       // now disconnected (no more copies to handle); the CSS hider remains until the
       // reload so queued snackbars don't flash.
-      try {
-        sessionStorage.setItem('max_export_result', JSON.stringify({
-          text: ensurePanel().querySelector('#max-exporter-progress').textContent
-        }));
-      } catch(e) {}
-      location.reload();
+      finalizeExport();
     }
   }
 
@@ -894,18 +899,18 @@ ${format.toUpperCase()}: ${out.length} сообщений${partInfo}
     if(msg?.type === 'MAX_EXPORT_START'){
       if(RUNNING){
         sendResponse({ok:false, error:'Уже запущено'});
-        return true;
+        return;
       }
       _resolvedSlug = null;
       RUNNING = true;
       sendResponse({ok:true});
-      exportPosts(msg);
-      return true;
+      sessionStorage.setItem('max_export_pending', JSON.stringify(msg));
+      location.reload();
+      return;
     }
     if(msg?.type === 'MAX_EXPORT_STOP'){
       SHOULD_STOP = true;
       sendResponse({ok:true});
-      return true;
     }
   });
 })();

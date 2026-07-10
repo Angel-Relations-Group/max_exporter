@@ -5,6 +5,15 @@ async function injectContentScript(tabId){
   if (!chrome.scripting) {
     throw new Error('Scripting API not available');
   }
+  // main-inject.js runs in the page's MAIN world to patch
+  // navigator.clipboard.writeText (link capture) and intercept History API
+  // (slug mapping). Inject it FIRST so it is ready before content.js may use it
+  // (e.g. when a pending export resumes immediately on load).
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    world: 'MAIN',
+    files: ['main-inject.js']
+  });
   await chrome.scripting.executeScript({
     target: { tabId },
     files: ['content.js']

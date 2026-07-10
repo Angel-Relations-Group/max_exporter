@@ -1,14 +1,20 @@
 #!/usr/bin/env node
-// Builds browser-specific extension packages from a single shared codebase.
+// Builds browser-specific extension packages from a shared codebase.
 //
-// The extension source files (background.js, content.js, content.css,
-// main-inject.js, popup.html, popup.js, ico.png) are identical for every
-// browser — they use the `chrome.*` API namespace which both Chrome and
-// Firefox support. The ONLY thing that differs is manifest.json, so this
-// script generates two output folders:
+// Most extension files (content.js, content.css, main-inject.js, popup.html,
+// popup.js, ico.png) are identical for every browser — they use the `chrome.*`
+// API namespace which both Chrome and Firefox support. Two things differ per
+// browser, so this script generates two output folders:
 //
-//   dist/chrome   -> manifest with `background.service_worker`
-//   dist/firefox  -> manifest with `background.scripts` + browser_specific_settings
+//   dist/chrome   -> source manifest (MV3 service_worker) +
+//                    background.chrome.js copied in as background.js
+//   dist/firefox  -> manifest (event-page scripts + gecko id/min version) +
+//                    background.firefox.js copied in as background.js
+//
+// The background script is browser-specific: the Chrome MV3 service worker has
+// no URL.createObjectURL (uses a data: URL), while Firefox's event page has it
+// and uses a blob: URL (Firefox blocks data: downloads). Each target therefore
+// ships only the background code that belongs to it.
 //
 // Usage:  node tools/build.mjs
 // CI then zips each folder (see .github/workflows/build-zip.yml).
@@ -24,7 +30,6 @@ const DIST = path.join(ROOT, 'dist');
 
 // Shared extension files copied verbatim into every target folder.
 const SHARED_FILES = [
-  'background.js',
   'content.js',
   'content.css',
   'main-inject.js',
@@ -32,6 +37,15 @@ const SHARED_FILES = [
   'popup.js',
   'ico.png'
 ];
+
+// Browser-specific background script source for each target. Each is copied
+// into its output folder as background.js, so the manifest reference
+// (service_worker / scripts) resolves regardless of target. The sources are
+// named per browser (background.chrome.js / background.firefox.js) for clarity.
+const BACKGROUND_SOURCE = {
+  chrome: 'background.chrome.js',
+  firefox: 'background.firefox.js'
+};
 
 // Stable add-on id used to sign the Firefox build on AMO. Change this to your
 // own id (email or UUID format) before publishing.
@@ -61,9 +75,8 @@ function makeChromeManifest(base) {
   return base;
 }
 
-// Firefox manifest: replace the service-worker background with an event-page
-// script and add the gecko-specific settings Firefox requires for signing.
-function makeFirefoxManifest(base) {
+  // Firefox manifest: add the gecko-specific settings Firefox requires for signing.
+  function makeFirefoxManifest(base) {
   const m = structuredClone(base);
   m.background = { scripts: ['background.js'] };
   m.browser_specific_settings = {
@@ -80,6 +93,18 @@ async function buildTarget(name, manifest) {
   await rmrf(dest);
   await fs.mkdir(dest, { recursive: true });
   await copySharedFiles(dest);
+
+  // Copy only this browser's background script, renamed to background.js so the
+  // manifest reference resolves regardless of target.
+  const bgFile = BACKGROUND_SOURCE[name];
+  const bgSrc = path.join(ROOT, bgFile);
+  try {
+    await fs.access(bgSrc);
+  } catch {
+    throw new Error(`Expected background script not found: ${bgFile}`);
+  }
+  await fs.copyFile(bgSrc, path.join(dest, 'background.js'));
+
   await fs.writeFile(
     path.join(dest, 'manifest.json'),
     JSON.stringify(manifest, null, 2) + '\n',
