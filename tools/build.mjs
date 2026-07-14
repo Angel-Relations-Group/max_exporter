@@ -49,7 +49,7 @@ const BACKGROUND_SOURCE = {
 
 // Stable add-on id used to sign the Firefox build on AMO. Change this to your
 // own id (email or UUID format) before publishing.
-const FIREFOX_ADDON_ID = 'max-channel-exporter@arg.tools';
+const FIREFOX_ADDON_ID = 'max-channel-exporter1@arg.tools';
 // Firefox 142 is the minimum required so that the `data_collection_permissions`
 // key (set below in browser_specific_settings.gecko) is recognized on both
 // desktop (140+) and Android (142+). This also comfortably covers MAIN-world
@@ -82,6 +82,10 @@ function makeChromeManifest(base) {
   function makeFirefoxManifest(base) {
   const m = structuredClone(base);
   m.background = { scripts: ['background.js'] };
+  // `license` is recognized by Firefox/AMO but not by Chrome (which warns
+  // "Unrecognized manifest key 'license'"), so it is injected here only for
+  // the Firefox build rather than kept in the shared source manifest.
+  m.license = 'MIT';
   m.browser_specific_settings = {
     gecko: {
       id: FIREFOX_ADDON_ID,

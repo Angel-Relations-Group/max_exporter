@@ -3,7 +3,6 @@
   "name": "MAX Channel Exporter",
   "version": "1.6.5",
   "description": "Экспорт постов из каналов мессенджера MAX в CSV или JSON.",
-  "license": "MIT",
   "permissions": [
     "activeTab",
     "downloads",
