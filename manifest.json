@@ -3,6 +3,7 @@
   "name": "MAX Channel Exporter",
   "version": "1.6.5",
   "description": "Экспорт постов из каналов мессенджера MAX в CSV или JSON.",
+  "license": "MIT",
   "permissions": [
     "activeTab",
     "downloads",
@@ -13,16 +14,12 @@
     "https://web.max.ru/*"
   ],
   "icons": {
-    "16": "ico.png",
-    "48": "ico.png",
     "128": "ico.png"
   },
   "action": {
     "default_title": "Export MAX posts",
     "default_popup": "popup.html",
     "default_icon": {
-      "16": "ico.png",
-      "48": "ico.png",
       "128": "ico.png"
     }
   },

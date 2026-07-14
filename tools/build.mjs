@@ -50,9 +50,12 @@ const BACKGROUND_SOURCE = {
 // Stable add-on id used to sign the Firefox build on AMO. Change this to your
 // own id (email or UUID format) before publishing.
 const FIREFOX_ADDON_ID = 'max-channel-exporter@arg.tools';
-// Firefox 128 is the first release to support `content_scripts[].world:"MAIN"`
-// (main-inject.js needs the MAIN world to patch navigator.clipboard.writeText).
-const FIREFOX_MIN_VERSION = '128.0';
+// Firefox 142 is the minimum required so that the `data_collection_permissions`
+// key (set below in browser_specific_settings.gecko) is recognized on both
+// desktop (140+) and Android (142+). This also comfortably covers MAIN-world
+// content scripts (128+), which main-inject.js needs to patch
+// navigator.clipboard.writeText.
+const FIREFOX_MIN_VERSION = '142.0';
 
 async function rmrf(target) {
   await fs.rm(target, { recursive: true, force: true });
@@ -82,7 +85,13 @@ function makeChromeManifest(base) {
   m.browser_specific_settings = {
     gecko: {
       id: FIREFOX_ADDON_ID,
-      strict_min_version: FIREFOX_MIN_VERSION
+      strict_min_version: FIREFOX_MIN_VERSION,
+      // Required by AMO validation since 2025: declares the add-on collects
+      // and transmits no data (all export happens locally on the user's
+      // device). "none" in `required` is the canonical "no collection" form.
+      data_collection_permissions: {
+        required: ['none']
+      }
     }
   };
   return m;
