@@ -39,7 +39,7 @@ https://chromewebstore.google.com/detail/max-channel-exporter/cpilbngjbfngnelkii
 
 ## Firefox
 
-После публикации расширения ссылка на Mozilla Add-ons будет добавлена сюда.
+https://addons.mozilla.org/ru/firefox/addon/max-channel-exporter/
 
 ---
 
