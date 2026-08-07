@@ -33,7 +33,123 @@
 
   const _linkByClean = new Map();   // identityKey -> post link (progress counter)
   const _linkByBubble = new WeakMap(); // bubble element -> post link (primary identity)
+  const _mediaByBubble = new WeakMap(); // bubble element -> discovered photo URLs
+  const _mediaByLink = new Map(); // post link -> discovered photo URLs
+  const _mediaByMessage = new Map(); // text + timestamp -> discovered photo URLs
   let _capturedLink = null;
+
+  function bestSrcFromImg(img) {
+    const candidates = [];
+    if (img.currentSrc) candidates.push(img.currentSrc);
+    const src = img.getAttribute('src');
+    if (src) candidates.push(src);
+    const srcset = img.getAttribute('srcset') || '';
+    srcset.split(',').forEach(part => {
+      const url = part.trim().split(/\s+/)[0];
+      if (url) candidates.push(url);
+    });
+    return candidates.filter(Boolean).pop() || '';
+  }
+
+  function normalizeMediaUrl(url) {
+    if (!url) return '';
+    try { return new URL(url, location.href).href; } catch(e) { return url; }
+  }
+
+  function findPhotoMedia(content) {
+    const candidates = [];
+    content.querySelectorAll('.media').forEach(media => {
+      if (media.closest('.avatar, .author, .sender, .meta, .reaction, .reactions')) return;
+      if (media.querySelector('video, audio, .video, .audio, .voice, .music')) return;
+      const rect = media.getBoundingClientRect();
+      const mediaArea = Math.max(0, rect.width) * Math.max(0, rect.height);
+      let largestImageArea = 0;
+      media.querySelectorAll('img').forEach(img => {
+        const width = img.naturalWidth || img.clientWidth || 0;
+        const height = img.naturalHeight || img.clientHeight || 0;
+        largestImageArea = Math.max(largestImageArea, width * height);
+      });
+      const hasPhotoShape = mediaArea >= 12000 || largestImageArea >= 40000 ||
+        !!media.querySelector('picture, source, [class*="photo" i], [class*="image" i]');
+      if (hasPhotoShape) candidates.push({ media, score: Math.max(mediaArea, largestImageArea) });
+    });
+    candidates.sort((a, b) => b.score - a.score);
+    return candidates.length ? candidates[0].media : null;
+  }
+
+  function extractPhotoUrls(bubble) {
+    const content = bubble.querySelector('.bubbleContent') || bubble;
+    const media = findPhotoMedia(content);
+    if (!media) return [];
+    const found = [];
+    media.querySelectorAll('img').forEach(img => {
+      const width = img.naturalWidth || img.clientWidth || 0;
+      const height = img.naturalHeight || img.clientHeight || 0;
+      if (width && height && width * height < 40000) return;
+      const attrs = ['src', 'data-src', 'data-original', 'data-url'];
+      const urls = [bestSrcFromImg(img), ...attrs.map(a => img.getAttribute(a) || '')];
+      urls.forEach(raw => {
+        const url = normalizeMediaUrl(raw);
+        if (url) found.push(url);
+      });
+    });
+    media.querySelectorAll('source').forEach(source => {
+      const srcset = source.getAttribute('srcset') || '';
+      srcset.split(',').forEach(part => {
+        const url = normalizeMediaUrl(part.trim().split(/\s+/)[0]);
+        if (url) found.push(url);
+      });
+    });
+    media.querySelectorAll('a[href]').forEach(a => {
+      const href = normalizeMediaUrl(a.getAttribute('href'));
+      if (href && !href.startsWith('https://max.ru/') && !href.startsWith('https://web.max.ru/')) found.push(href);
+    });
+    media.querySelectorAll('*').forEach(el => {
+      const bg = getComputedStyle(el).backgroundImage || '';
+      const match = bg.match(/^url\(["']?(.*?)["']?\)$/);
+      if (match) found.push(normalizeMediaUrl(match[1]));
+    });
+    return [...new Set(found.filter(url => /^https?:|^blob:|^data:image\//.test(url)))];
+  }
+
+  function rememberMedia(bubble, link) {
+    const fresh = extractPhotoUrls(bubble);
+    const known = _mediaByBubble.get(bubble) || [];
+    const merged = [...new Set([...known, ...fresh])];
+    if (merged.length) {
+      _mediaByBubble.set(bubble, merged);
+      if (link) _mediaByLink.set(link, [...new Set([...( _mediaByLink.get(link) || []), ...merged])]);
+    }
+    return merged;
+  }
+
+  function messageMediaKey(text, time) {
+    return `${time || 0}|${cleanText(text)}`;
+  }
+
+  function rememberMessageMedia(text, time, urls) {
+    if (!urls || !urls.length) return;
+    const key = messageMediaKey(text, time);
+    _mediaByMessage.set(key, [...new Set([...(_mediaByMessage.get(key) || []), ...urls])]);
+  }
+
+  async function ensurePhotoUrlsForBubble(bubble) {
+    const link = _linkByBubble.get(bubble);
+    let urls = rememberMedia(bubble, link);
+    if (urls.length || detectMediaType(bubble) !== 'Фото') return urls;
+
+    // MAX lazy-loads old photos only while the bubble is actually inside the
+    // viewport. Bring it to the centre and wait; never open the photo viewer,
+    // because MAX does not expose a reliable programmatic close action.
+    try {
+      bubble.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'auto' });
+    } catch(e) {}
+    for (let i = 0; i < 25 && !urls.length; i++) {
+      await sleep(100);
+      urls = rememberMedia(bubble, link);
+    }
+    return urls;
+  }
 
   // Listen for captured links from main-inject.js (clipboard interception)
   window.addEventListener('message', function(e) {
@@ -90,6 +206,7 @@
   // stable unique id; text/media tokens can collide, so it is the dedup key.
   function storeLink(bubble, link, text, token) {
     _linkByBubble.set(bubble, link);
+    rememberMedia(bubble, link);
     const dc = identityKey(text, token);
     if (!_linkByClean.has(dc)) _linkByClean.set(dc, link);
   }
@@ -110,6 +227,7 @@
     if (!hist) return;
     const todo = [];
     for (const bubble of hist.querySelectorAll(SEL_BUBBLE)) {
+      rememberMedia(bubble, _linkByBubble.get(bubble));
       if (_linkByBubble.has(bubble)) continue;
       const text = extractBubbleText(bubble);
       if (text.length <= 2) continue;
@@ -178,13 +296,11 @@
 
   function detectMediaType(bubble) {
     const content = bubble.querySelector('.bubbleContent') || bubble;
-    const media = content.querySelector('.media');
+    const media = findPhotoMedia(content) || content.querySelector('.media');
     if (media) {
       if (media.querySelector('.video, video')) return lbl('Видео', getMediaFileName(content));
       if (media.querySelector('audio, .audio, .voice, .music')) return lbl('Аудио', getMediaFileName(content));
-      // A .media block that is neither video nor audio is a photo grid. The
-      // <img> may be lazy/unloaded, so don't require it to be present.
-      return 'Фото';
+      if (findPhotoMedia(content) === media) return 'Фото';
     }
     const attaches = content.querySelector('.attaches');
     if (attaches) {
@@ -541,7 +657,7 @@
   }
 
   function toExcelCsv(rows){
-    const header = ['datetime','post_link','text','views','reactions_total'];
+    const header = ['datetime','post_link','text','media_files','views','reactions_total'];
     const lines = [];
     lines.push(header.map(csvSafe).join(';'));
     for(const r of rows){
@@ -549,6 +665,7 @@
         csvSafe(r.datetime || ''),
         csvSafe(r.post_link || ''),
         csvSafe(r.text || ''),
+        csvSafe((r.media_files || []).join(', ')),
         csvSafe(r.views ?? ''),
         csvSafe(r.reactions_total ?? '')
       ].join(';'));
@@ -570,6 +687,28 @@
         }
       );
     });
+  }
+
+  function downloadUrl(url, filename){
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage(
+        { type: 'MAX_EXPORT_DOWNLOAD_URL', url, filename },
+        (resp) => {
+          const err = chrome.runtime.lastError;
+          if (err) resolve({ ok: false, error: err.message });
+          else resolve(resp || { ok: false, error: 'нет ответа от фоновой службы' });
+        }
+      );
+    });
+  }
+
+  function extensionFromUrl(url) {
+    try {
+      const path = new URL(url).pathname;
+      const m = path.match(/\.([a-z0-9]{2,5})$/i);
+      if (m && /^(?:jpe?g|png|webp|heic|gif|bmp|tiff?)$/i.test(m[1])) return m[1].toLowerCase().replace('jpeg', 'jpg');
+    } catch(e) {}
+    return 'jpg';
   }
 
   function validateRequiredElements(){
@@ -637,6 +776,39 @@
     scrollChat('bottom');
     await sleep(400);
     scrollChat('bottom');
+  }
+
+  async function scanLoadedHistoryForPhotos() {
+    const scrollable = getScrollable();
+    const history = document.querySelector(SEL_HISTORY);
+    if (!scrollable || !history) return;
+
+    const step = Math.max(240, Math.floor(scrollable.clientHeight * 0.65));
+    let position = 0;
+    let pass = 0;
+    while (!SHOULD_STOP) {
+      const maxPosition = Math.max(0, scrollable.scrollHeight - scrollable.clientHeight);
+      if (position > maxPosition) position = maxPosition;
+      scrollable.scrollTop = position;
+      scrollable.dispatchEvent(new Event('scroll', { bubbles: true }));
+      await sleep(450);
+
+      const visible = collectDomMessages().filter(message => {
+        if (!message.bubble || !message.bubble.isConnected) return false;
+        const rect = message.bubble.getBoundingClientRect();
+        return rect.bottom >= 0 && rect.top <= window.innerHeight;
+      });
+      for (const message of visible) {
+        const urls = rememberMedia(message.bubble, _linkByBubble.get(message.bubble));
+        rememberMessageMedia(message.text, message.time, urls);
+      }
+
+      pass++;
+      setProgress(`Загрузка фотографий: проход ${pass} | Найдено: ${_mediaByMessage.size}`);
+      if (position >= maxPosition) break;
+      position = Math.min(position + step, maxPosition);
+    }
+    await sleep(300);
   }
 
   const EXCLUDE_EXACT = ['трансляция началась', 'трансляция закончилась'];
@@ -762,14 +934,25 @@
         const viewEl = ctx.querySelector('[class*="views" i]');
         if (viewEl) views = parseViews(viewEl.textContent);
 
-        out.push({ text, token: bubbleMediaToken(bubble), bubble, time, reactions, views });
+        const mediaUrls = rememberMedia(bubble, _linkByBubble.get(bubble));
+        rememberMessageMedia(text, time, mediaUrls);
+        out.push({
+          text,
+          token: bubbleMediaToken(bubble),
+          bubble,
+          time,
+          reactions,
+          views,
+          expectedPhoto: detectMediaType(bubble) === 'Фото',
+          mediaUrls
+        });
       });
     });
     return out;
   }
 
   async function doExport(params) {
-    const {maxScrolls, format, startDate, endDate, startDateSet, endDateSet, paginationEnabled, paginationRows} = params;
+    const {maxScrolls, format, startDate, endDate, startDateSet, endDateSet, downloadPhotos, paginationEnabled, paginationRows} = params;
 
     if(!validateRequiredElements()){
       setProgress('Ошибка: не найдены элементы чата на странице');
@@ -839,6 +1022,11 @@
       if(stableRounds >= maxStable) break;
     }
 
+    // MAX lazy-loads old image thumbnails only while their bubbles are visible.
+    // Run the extra media scan only when the user requested media downloads.
+    if (downloadPhotos) {
+      await scanLoadedHistoryForPhotos();
+    }
     await sleep(1000);
 
     const collected = collectDomMessages();
@@ -871,11 +1059,28 @@
 
     results.sort((a, b) => a.time - b.time);
 
+    let photoNumber = 0;
+    const photoJobs = [];
     const out = results.map(m => {
+      const urls = [...new Set([
+        ...(m.mediaUrls || []),
+        ...(_mediaByLink.get(m._link) || []),
+        ...(_mediaByMessage.get(messageMediaKey(m.text, m.time)) || [])
+      ])];
+      const mediaFiles = urls.map((url, index) => {
+        photoNumber++;
+        const datePart = m.time ? `${new Date(m.time).getFullYear()}-${pad(new Date(m.time).getMonth() + 1)}-${pad(new Date(m.time).getDate())}` : 'unknown-date';
+        const filename = `${datePart}_${String(photoNumber).padStart(5, '0')}_${String(index + 1).padStart(2, '0')}.${extensionFromUrl(url)}`;
+        photoJobs.push({ url, filename });
+        return filename;
+      });
       return {
         datetime: m.time ? formatTime(m.time) : '',
         post_link: m._link || '',
         text: m.text,
+        media_files: mediaFiles,
+        media_urls: urls,
+        expected_photo: !!m.expectedPhoto,
         views: m.views || '',
         reactions_total: m.reactions || ''
       };
@@ -888,6 +1093,8 @@
       }
       const now = new Date();
       const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+      const exportFolder = `MAX_Export_${slug}_${ts}`;
+      const missingPhotoMessages = out.filter(row => row.expected_photo && !(row.media_urls || []).length).length;
       const chunkSize = (paginationEnabled && paginationRows > 0) ? paginationRows : out.length;
       const totalParts = Math.ceil(out.length / chunkSize);
 
@@ -901,8 +1108,8 @@
 
         const content = format === 'json' ? JSON.stringify(chunk, null, 2) : toExcelCsv(chunk);
         const filename = format === 'json'
-          ? `max_${slug}_${ts}${suffix}.json`
-          : `max_${slug}_${ts}${suffix}.csv`;
+          ? `${exportFolder}/max_${slug}_${ts}${suffix}.json`
+          : `${exportFolder}/max_${slug}_${ts}${suffix}.csv`;
         const mime = format === 'json' ? 'application/json' : 'text/csv;charset=utf-8;';
 
         const resp = await downloadFile(content, filename, mime);
@@ -912,12 +1119,27 @@
         }
       }
 
+      if (downloadPhotos && !SHOULD_STOP) {
+        for (let i = 0; i < photoJobs.length; i++) {
+          if (SHOULD_STOP) break;
+          const job = photoJobs[i];
+          setProgress(`Скачивание фото ${i + 1} из ${photoJobs.length}...`);
+          const resp = await downloadUrl(job.url, `${exportFolder}/media/${job.filename}`);
+          if (!resp || !resp.ok) {
+            downloadErrors.push(`Фото ${job.filename}: ${(resp && (resp.error || resp.state)) || 'ошибка'}`);
+          }
+          await sleep(80);
+        }
+      }
+
       if (downloadErrors.length) {
         setProgress(`Ошибки скачивания:\n${downloadErrors.join('\n')}`);
       } else {
         const partInfo = totalParts > 1 ? ` в ${totalParts} файлах (${chunkSize} строк/файл)` : '';
         setProgress(`Готово.
 ${format.toUpperCase()}: ${out.length} сообщений${partInfo}
+Фото: ${photoJobs.length}${downloadPhotos ? ' + отдельные файлы' : ' найдено'}
+Не найдено фото у сообщений: ${missingPhotoMessages}
 Файлы сохранены в папке по умолчанию.`);
       }
     } catch (e) {

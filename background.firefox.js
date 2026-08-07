@@ -6,11 +6,36 @@
 // chrome.downloads, and the blob is released (revokeObjectURL) after
 // completion/timeout. The response is returned asynchronously.
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg?.type !== 'MAX_EXPORT_DOWNLOAD') return false;
+  if (!['MAX_EXPORT_DOWNLOAD', 'MAX_EXPORT_DOWNLOAD_URL'].includes(msg?.type)) return false;
 
   if (typeof chrome.downloads?.download !== 'function') {
     sendResponse({ ok: false, error: 'chrome.downloads недоступен — перезагрузите расширение' });
     return false;
+  }
+
+  if (msg.type === 'MAX_EXPORT_DOWNLOAD_URL') {
+    chrome.downloads.download({
+      url: msg.url,
+      filename: msg.filename,
+      saveAs: false,
+      conflictAction: 'uniquify'
+    }).then(id => {
+      const onDone = (state) => {
+        chrome.downloads.onChanged.removeListener(onChange);
+        clearTimeout(timer);
+        sendResponse({ ok: state === 'complete', id, state });
+      };
+      const onChange = (delta) => {
+        if (delta.id !== id || !delta.state) return;
+        const state = delta.state.current;
+        if (state === 'complete' || state === 'interrupted') onDone(state);
+      };
+      const timer = setTimeout(() => onDone('timeout'), 60000);
+      chrome.downloads.onChanged.addListener(onChange);
+    }).catch(err => {
+      sendResponse({ ok: false, error: (err && err.message) || String(err) });
+    });
+    return true;
   }
 
   const mime = (msg.mime || 'text/plain').replace(/;\s*$/, '');

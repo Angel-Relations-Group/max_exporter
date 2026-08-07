@@ -68,6 +68,7 @@ qs('#run').addEventListener('click', async ()=>{
       endDate: qs('#endDate').value || null,
       startDateSet: qs('#startDate').value !== '',
       endDateSet: qs('#endDate').value !== '',
+      downloadPhotos: qs('#downloadPhotos').checked,
       paginationEnabled: qs('#paginationEnabled').checked,
       paginationRows: parseInt(qs('#paginationRows').value || '350', 10)
     });
