@@ -8,6 +8,10 @@
   const SEL_HISTORY = 'div.history';
   const SEL_ITEM = 'div.item';
   const SEL_BUBBLE = 'div.bubble';
+  // sessionStorage key for the multi-session export state (declared here —
+  // early in the file — because checkPendingExport below reads it during the
+  // initial script evaluation, before the later storage helpers execute).
+  const SESSION_KEY = 'max_export_session';
 
   let RUNNING = false;
   let SHOULD_STOP = false;
@@ -34,9 +38,16 @@
   const _linkByClean = new Map();   // identityKey -> post link (progress counter)
   const _linkByBubble = new WeakMap(); // bubble element -> post link (primary identity)
   const _mediaByBubble = new WeakMap(); // bubble element -> discovered photo URLs
-  const _mediaByLink = new Map(); // post link -> discovered photo URLs
-  const _mediaByMessage = new Map(); // text + timestamp -> discovered photo URLs
+  const _recordByBubble = new WeakMap(); // bubble element -> this session's record (photo pass)
+  let _collectMedia = false; // "download photos" enabled — collect image URLs while scanning
   let _capturedLink = null;
+
+  // ---- Photo URL discovery (batch media download) ----
+  // MAX renders photos lazily: an <img> outside the viewport may have no src
+  // yet, and a loaded one exposes several candidates (currentSrc, src, srcset,
+  // data-attrs, CSS backgrounds). Collect every plausible URL per bubble and
+  // merge across passes; the final report lists them and the download step
+  // fetches each into a per-export media/ folder.
 
   function bestSrcFromImg(img) {
     const candidates = [];
@@ -56,6 +67,8 @@
     try { return new URL(url, location.href).href; } catch(e) { return url; }
   }
 
+  // The .media block that actually carries the photo (as opposed to avatars,
+  // tiny inline previews or video/audio players), scored by rendered area.
   function findPhotoMedia(content) {
     const candidates = [];
     content.querySelectorAll('.media').forEach(media => {
@@ -93,8 +106,8 @@
         if (url) found.push(url);
       });
     });
-    media.querySelectorAll('source').forEach(source => {
-      const srcset = source.getAttribute('srcset') || '';
+    media.querySelectorAll('source').forEach(srcsetEl => {
+      const srcset = srcsetEl.getAttribute('srcset') || '';
       srcset.split(',').forEach(part => {
         const url = normalizeMediaUrl(part.trim().split(/\s+/)[0]);
         if (url) found.push(url);
@@ -112,41 +125,28 @@
     return [...new Set(found.filter(url => /^https?:|^blob:|^data:image\//.test(url)))];
   }
 
-  function rememberMedia(bubble, link) {
+  // Merge freshly discovered URLs into the per-bubble set (images keep loading
+  // as the chat scrolls, so later passes may see more candidates).
+  function rememberMedia(bubble) {
     const fresh = extractPhotoUrls(bubble);
     const known = _mediaByBubble.get(bubble) || [];
     const merged = [...new Set([...known, ...fresh])];
-    if (merged.length) {
-      _mediaByBubble.set(bubble, merged);
-      if (link) _mediaByLink.set(link, [...new Set([...( _mediaByLink.get(link) || []), ...merged])]);
-    }
+    if (merged.length) _mediaByBubble.set(bubble, merged);
     return merged;
   }
 
-  function messageMediaKey(text, time) {
-    return `${time || 0}|${cleanText(text)}`;
-  }
-
-  function rememberMessageMedia(text, time, urls) {
-    if (!urls || !urls.length) return;
-    const key = messageMediaKey(text, time);
-    _mediaByMessage.set(key, [...new Set([...(_mediaByMessage.get(key) || []), ...urls])]);
-  }
-
+  // MAX lazy-loads old photos only while the bubble is actually inside the
+  // viewport. Bring it to the centre and wait; never open the photo viewer,
+  // because MAX does not expose a reliable programmatic close action.
   async function ensurePhotoUrlsForBubble(bubble) {
-    const link = _linkByBubble.get(bubble);
-    let urls = rememberMedia(bubble, link);
+    let urls = rememberMedia(bubble);
     if (urls.length || detectMediaType(bubble) !== 'Фото') return urls;
-
-    // MAX lazy-loads old photos only while the bubble is actually inside the
-    // viewport. Bring it to the centre and wait; never open the photo viewer,
-    // because MAX does not expose a reliable programmatic close action.
     try {
       bubble.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'auto' });
     } catch(e) {}
     for (let i = 0; i < 25 && !urls.length; i++) {
       await sleep(100);
-      urls = rememberMedia(bubble, link);
+      urls = rememberMedia(bubble);
     }
     return urls;
   }
@@ -172,10 +172,29 @@
   function _removeSnackbars() {
     document.querySelectorAll(_snackbarSel).forEach(el => { try { el.remove(); } catch(e){} });
   }
+  // Inspect only freshly ADDED nodes (and skip mutations inside the chat
+  // history, which dominate during scrolling) instead of re-querying the whole
+  // document on every mutation batch — a full-document [class*="snackbar"]
+  // scan per batch made exports progressively slower as the DOM grew.
+  function _nodeLooksSnackbar(el) {
+    try { return !!(el.matches && el.matches(_snackbarSel)); } catch(e) { return false; }
+  }
   function _startSnackbarObserver() {
     if (_snackbarObserver) return;
-    _snackbarObserver = new MutationObserver(() => {
-      if (_toastSuppressing) _removeSnackbars();
+    _snackbarObserver = new MutationObserver((muts) => {
+      if (!_toastSuppressing) return;
+      for (const m of muts) {
+        for (const n of m.addedNodes) {
+          if (!n || n.nodeType !== 1) continue;
+          if (n.closest && n.closest(SEL_HISTORY)) continue;
+          if (_nodeLooksSnackbar(n)) { try { n.remove(); } catch(e){} continue; }
+          if (n.querySelectorAll) {
+            let inner = null;
+            try { inner = n.querySelectorAll(_snackbarSel); } catch(e) {}
+            if (inner) inner.forEach(el => { try { el.remove(); } catch(e){} });
+          }
+        }
+      }
     });
     _snackbarObserver.observe(document.documentElement, { childList: true, subtree: true });
   }
@@ -206,52 +225,159 @@
   // stable unique id; text/media tokens can collide, so it is the dedup key.
   function storeLink(bubble, link, text, token) {
     _linkByBubble.set(bubble, link);
-    rememberMedia(bubble, link);
     const dc = identityKey(text, token);
     if (!_linkByClean.has(dc)) _linkByClean.set(dc, link);
   }
 
-  // Capture a link for one bubble via the context menu (skips already-captured).
-  // Returns true on success.
-  async function captureLinkForBubble(bubble, text, token) {
-    if (_linkByBubble.has(bubble)) return true;
-    const link = await getLinkForBubble(bubble);
-    if (link) { storeLink(bubble, link, text, token); return true; }
-    return false;
+  // ---- Incremental message processing ----
+  // Messages are processed as the upward scroll encounters them: capture the
+  // post link, record the row (text/time/views/reactions) right away.
+  //
+  // IMPORTANT (verified live on max.ru): the app keeps every loaded message
+  // mounted in its Svelte tree no matter what we do to the DOM — hiding items
+  // frees no memory, and removing nodes outright breaks history loading (the
+  // app re-renders in a spiral and stops prepending). Memory is therefore NOT
+  // bounded by DOM tricks but by splitting the export into page-reload
+  // sessions (see doExportSession); a processed item is only marked as done so
+  // later scans skip it, and its media players are neutralized (the feed
+  // autoplays videos, which burns RAM/CPU).
+  let _records = [];          // this session's rows: {key, link, text, time, views, reactions}
+  let _seenKeys = new Set();  // link || identityKey — row-level dedup (session)
+  let _linksCount = 0;
+  let _useDateRange = false;
+  let _startMs = 0;
+  let _endMs = Infinity;
+  const _releasedItems = new WeakSet();
+  const _doneBubbles = new WeakSet();
+  const _bubbleTries = new WeakMap();
+  const _itemDateCache = new WeakMap(); // released item -> date (ms) in effect after it
+  const _MAX_CAPTURE_TRIES = 4;
+  // Reload the page once the retained DOM reaches this many chat items; the
+  // next session deep-links to the oldest captured post and continues. ~800
+  // items keeps the tab in the low-gigabyte range even for huge channels.
+  const SESSION_ITEM_LIMIT_DEFAULT = 800;
+
+  function releaseItem(item, dateAfterMs) {
+    if (_releasedItems.has(item)) return;
+    _releasedItems.add(item);
+    _itemDateCache.set(item, { after: dateAfterMs == null ? null : dateAfterMs });
+    try { item.dataset.maxExportDone = '1'; } catch(e) {}
+    try {
+      // Stop autoplaying media in processed items; everything stays visible.
+      item.querySelectorAll('video').forEach(v => {
+        try { v.pause(); } catch(e) {}
+        try { if (v.srcObject) v.srcObject = null; } catch(e) {}
+        v.removeAttribute('src');
+        try { v.load(); } catch(e) {}
+      });
+      item.querySelectorAll('audio').forEach(a => {
+        try { a.pause(); } catch(e) {}
+        a.removeAttribute('src');
+        try { a.load(); } catch(e) {}
+      });
+    } catch(e) {}
   }
 
-  // Collect links for all currently visible messages via the context menu
-  // "Copy link to post" (captured through the patched clipboard.writeText).
-  async function collectLinksForVisible() {
+  // Extract the exportable row fields that come straight from the DOM (no link).
+  function buildMessageRecord(bubble, text, time, link, idKey) {
+    const ctx = bubble.closest('.messageWrapper') || bubble.closest('.block') || bubble.closest('[class*="wrapper"]') || bubble;
+    let reactions = 0;
+    ctx.querySelectorAll('.reaction .counter').forEach(c => {
+      const n = parseInt((c.textContent || '').trim(), 10);
+      if (!isNaN(n)) reactions += n;
+    });
+    let views = 0;
+    const viewEl = ctx.querySelector('[class*="views" i]');
+    if (viewEl) views = parseViews(viewEl.textContent);
+    const rec = { key: link || ('i:' + idKey), link: link || '', text, time, views, reactions };
+    if (_collectMedia) {
+      rec.mediaUrls = rememberMedia(bubble);
+      rec.expectedPhoto = detectMediaType(bubble) === 'Фото';
+    }
+    _recordByBubble.set(bubble, rec);
+    return rec;
+  }
+
+  // One pass over the currently loaded chat DOM (top -> bottom = oldest ->
+  // newest). Date context is tracked at the BUBBLE level: day-separator
+  // capsules and bubbles are visited together in document order, because one
+  // div.item can contain several capsules AND message blocks (verified on
+  // MAX), and a per-item date misdates messages at day boundaries. Messages
+  // outside the requested date range are skipped entirely — no context-menu
+  // round trip, no snackbar, no counting.
+  // finalPass (after the scroll loop): records bubbles whose capture kept
+  // failing with an empty link instead of leaving them unprocessed.
+  async function processLoadedMessages(finalPass) {
     const hist = document.querySelector(SEL_HISTORY);
     if (!hist) return;
-    const todo = [];
-    for (const bubble of hist.querySelectorAll(SEL_BUBBLE)) {
-      rememberMedia(bubble, _linkByBubble.get(bubble));
-      if (_linkByBubble.has(bubble)) continue;
-      const text = extractBubbleText(bubble);
-      if (text.length <= 2) continue;
-      todo.push({ bubble, text, token: bubbleMediaToken(bubble) });
-    }
-    // First pass; retry once for bubbles whose capture raced.
-    const missed = [];
-    for (const m of todo) {
-      if (SHOULD_STOP) break;
-      if (!await captureLinkForBubble(m.bubble, m.text, m.token)) missed.push(m);
-    }
-    for (const m of missed) {
-      if (SHOULD_STOP) break;
-      await captureLinkForBubble(m.bubble, m.text, m.token);
-    }
-  }
+    let curDateMs = null;
+    const items = hist.querySelectorAll(SEL_ITEM);
 
-  // Capture links for collected messages that are still missing one. Called after
-  // the scroll loop, when the DOM holds the final set of messages.
-  async function fillMissingLinks(results) {
-    for (const m of results) {
-      if (SHOULD_STOP) break;
-      if (!m.bubble) continue;
-      await captureLinkForBubble(m.bubble, m.text, m.token);
+    for (const item of items) {
+      if (_releasedItems.has(item)) {
+        const c = _itemDateCache.get(item);
+        if (c && c.after != null) curDateMs = c.after;
+        continue;
+      }
+
+      const useFallback = !item.querySelector(SEL_BUBBLE);
+      const walkSel = useFallback
+        ? 'span.capsule, [class*="bubble"], [class*="message"], [class*="content"]'
+        : 'span.capsule, ' + SEL_BUBBLE;
+
+      let pending = false;
+      for (const node of item.querySelectorAll(walkSel)) {
+        if (node.matches('span.capsule')) {
+          const d = parseCapsuleDate(node.textContent);
+          if (d != null) curDateMs = d;
+          continue;
+        }
+        const bubble = node;
+        if (_doneBubbles.has(bubble)) continue;
+        const text = extractBubbleText(bubble);
+        if (text.length <= 2 || isExcludedMessage(text)) { _doneBubbles.add(bubble); continue; }
+        const block = bubble.closest('.block');
+        const tod = nodeTimeMs(block || item);  // per-message time of day
+        const t = curDateMs != null ? curDateMs + tod : null;
+
+        // Outside the requested range: never capture a link for this message.
+        if (_useDateRange && t != null && (t > _endMs || t < _startMs)) {
+          _doneBubbles.add(bubble);
+          continue;
+        }
+
+        const token = bubbleMediaToken(bubble);
+        const idKey = identityKey(text, token);
+        let link = _linkByClean.get(idKey) || null;
+        if (!link) {
+          const tries = (_bubbleTries.get(bubble) || 0) + 1;
+          _bubbleTries.set(bubble, tries);
+          if (!SHOULD_STOP && tries <= _MAX_CAPTURE_TRIES) {
+            link = await getLinkForBubble(bubble);
+            if (link) storeLink(bubble, link, text, token);
+          }
+        } else {
+          _linkByBubble.set(bubble, link);
+        }
+        if (link) {
+          _doneBubbles.add(bubble);
+          if (!_seenKeys.has(link)) {
+            _seenKeys.add(link);
+            _records.push(buildMessageRecord(bubble, text, t == null ? 0 : t, link, idKey));
+            _linksCount++;
+          }
+        } else if (finalPass || (_bubbleTries.get(bubble) || 0) >= _MAX_CAPTURE_TRIES) {
+          // Completeness first: keep the row, the link stays empty.
+          _doneBubbles.add(bubble);
+          if (!_seenKeys.has(idKey)) {
+            _seenKeys.add(idKey);
+            _records.push(buildMessageRecord(bubble, text, t == null ? 0 : t, '', idKey));
+          }
+        } else {
+          pending = true; // transient capture race — retry on a later pass
+        }
+      }
+      if (!pending) releaseItem(item, curDateMs);
     }
   }
 
@@ -296,11 +422,15 @@
 
   function detectMediaType(bubble) {
     const content = bubble.querySelector('.bubbleContent') || bubble;
-    const media = findPhotoMedia(content) || content.querySelector('.media');
+    const photoMedia = findPhotoMedia(content);
+    const media = photoMedia || content.querySelector('.media');
     if (media) {
       if (media.querySelector('.video, video')) return lbl('Видео', getMediaFileName(content));
       if (media.querySelector('audio, .audio, .voice, .music')) return lbl('Аудио', getMediaFileName(content));
-      if (findPhotoMedia(content) === media) return 'Фото';
+      // A .media block that is neither video nor audio nor a small non-photo
+      // preview is a photo grid. The <img> may be lazy/unloaded, so don't
+      // require it to be present.
+      if (photoMedia) return 'Фото';
     }
     const attaches = content.querySelector('.attaches');
     if (attaches) {
@@ -376,7 +506,7 @@
     return token ? dc + '|' + token.substring(0, 120) : dc;
   }
 
-  // Extract the text from a bubble element (used by collectDomMessages)
+  // Extract the text from a bubble element (used by processLoadedMessages)
   function extractBubbleText(bubble) {
     const content = bubble.querySelector('.bubbleContent') || bubble;
     // The caption is a direct child span.text of bubbleContent. If absent the
@@ -403,17 +533,29 @@
     }
     return null;
   }
+  // Force-remove leftover context menus. On a sluggish page the app can be
+  // slow to tear the previous menu down, and findCopyLinkItem() would then
+  // click the STALE item — capturing the previous post's link for this bubble
+  // (that message then vanishes from the export as a "duplicate"). Removing
+  // menu nodes before every attempt makes any menu we find provably fresh.
+  const MENU_CONTAINER_SEL = '.actionsMenu, .menuContainer, [class*="actionsMenu"], [class*="menuContainer"]';
+  function removeMenus() {
+    document.querySelectorAll(MENU_CONTAINER_SEL).forEach(el => { try { el.remove(); } catch(e){} });
+  }
   async function getLinkForBubble(bubble) {
     async function attempt() {
       _capturedLink = null;
-      dismissMenu();  // clear any stale menu first
-      await sleep(20);
+      removeMenus();
+      dismissMenu();
+      await sleep(30);
+      removeMenus();  // the app may tear its menu down asynchronously
       bubble.dispatchEvent(new MouseEvent('contextmenu', {bubbles: true, cancelable: true, button: 2, clientX: 200, clientY: 300}));
       const item = await waitFor(findCopyLinkItem, 15, 20);
       if (!item) return null;
       item.click();
       const link = await waitFor(()=>_capturedLink, 15, 30);  // wait for clipboard capture
       _capturedLink = null;
+      removeMenus();
       return link;
     }
 
@@ -525,23 +667,46 @@
   }
 
   (function checkPendingExport() {
+    // Two entry points:
+    //  * 'max_export_pending'      — a fresh export request from the popup
+    //  * 'max_export_session'      — the next session of a running multi-session
+    //                                export (page was reloaded/deep-linked)
+    let st = null;
     const pending = sessionStorage.getItem('max_export_pending');
-    if (!pending) return;
-    sessionStorage.removeItem('max_export_pending');
-
-    let params;
-    try {
-      params = JSON.parse(pending);
-    } catch(e) {
-      setProgress('Ошибка: повреждённые данные экспорта');
-      return;
+    if (pending) {
+      sessionStorage.removeItem('max_export_pending');
+      let params;
+      try {
+        params = JSON.parse(pending);
+      } catch(e) {
+        setProgress('Ошибка: повреждённые данные экспорта');
+        return;
+      }
+      st = { params, phase: 'run', sessionNo: 1, entryLink: null, roundsUsed: 0, totalRecords: 0 };
+      saveSession(st);
+      idbClear().catch(function(){});  // drop any leftover rows from an aborted run
+    } else {
+      const saved = sessionStorage.getItem(SESSION_KEY);
+      if (!saved) return;
+      try {
+        st = JSON.parse(saved);
+      } catch(e) {
+        sessionStorage.removeItem(SESSION_KEY);
+        return;
+      }
+      if (!st || st.phase !== 'run' || !st.params) {
+        sessionStorage.removeItem(SESSION_KEY);
+        return;
+      }
     }
 
     (async () => {
       const panel = ensurePanel();
       panel.style.display = 'block';
       panel.querySelector('#max-exporter-stop').style.display = 'block';
-      setProgress('Перезагрузка... Ожидание загрузки чата...');
+      setProgress(st.sessionNo > 1
+        ? `Сессия ${st.sessionNo}: ожидание загрузки чата...`
+        : 'Перезагрузка... Ожидание загрузки чата...');
 
       for (let i = 0; i < 60; i++) {
         await sleep(1000);
@@ -565,8 +730,9 @@
       }
 
       RUNNING = true;
-      doExport(params).catch(e => {
+      doExportSession(st.params, st).catch(e => {
         setProgress('Ошибка: ' + e.message);
+        try { sessionStorage.removeItem(SESSION_KEY); } catch(e2) {}
         finalizeExport();
       });
     })();
@@ -689,6 +855,13 @@
     });
   }
 
+  function validateRequiredElements(){
+    return !!(document.querySelector(SEL_HISTORY) && document.querySelector(SEL_ITEM));
+  }
+
+  // Ask the background to download a remote URL (chat media) via
+  // chrome.downloads. Resolves with the background response, or an error from
+  // chrome.runtime.lastError / a missing response.
   function downloadUrl(url, filename){
     return new Promise((resolve) => {
       chrome.runtime.sendMessage(
@@ -702,6 +875,8 @@
     });
   }
 
+  // File extension for a media download, whitelisted to image formats (the
+  // URL path may carry none at all — CDN links often don't).
   function extensionFromUrl(url) {
     try {
       const path = new URL(url).pathname;
@@ -709,10 +884,6 @@
       if (m && /^(?:jpe?g|png|webp|heic|gif|bmp|tiff?)$/i.test(m[1])) return m[1].toLowerCase().replace('jpeg', 'jpg');
     } catch(e) {}
     return 'jpg';
-  }
-
-  function validateRequiredElements(){
-    return !!(document.querySelector(SEL_HISTORY) && document.querySelector(SEL_ITEM));
   }
 
   function getScrollable() {
@@ -776,39 +947,6 @@
     scrollChat('bottom');
     await sleep(400);
     scrollChat('bottom');
-  }
-
-  async function scanLoadedHistoryForPhotos() {
-    const scrollable = getScrollable();
-    const history = document.querySelector(SEL_HISTORY);
-    if (!scrollable || !history) return;
-
-    const step = Math.max(240, Math.floor(scrollable.clientHeight * 0.65));
-    let position = 0;
-    let pass = 0;
-    while (!SHOULD_STOP) {
-      const maxPosition = Math.max(0, scrollable.scrollHeight - scrollable.clientHeight);
-      if (position > maxPosition) position = maxPosition;
-      scrollable.scrollTop = position;
-      scrollable.dispatchEvent(new Event('scroll', { bubbles: true }));
-      await sleep(450);
-
-      const visible = collectDomMessages().filter(message => {
-        if (!message.bubble || !message.bubble.isConnected) return false;
-        const rect = message.bubble.getBoundingClientRect();
-        return rect.bottom >= 0 && rect.top <= window.innerHeight;
-      });
-      for (const message of visible) {
-        const urls = rememberMedia(message.bubble, _linkByBubble.get(message.bubble));
-        rememberMessageMedia(message.text, message.time, urls);
-      }
-
-      pass++;
-      setProgress(`Загрузка фотографий: проход ${pass} | Найдено: ${_mediaByMessage.size}`);
-      if (position >= maxPosition) break;
-      position = Math.min(position + step, maxPosition);
-    }
-    await sleep(300);
   }
 
   const EXCLUDE_EXACT = ['трансляция началась', 'трансляция закончилась'];
@@ -892,79 +1030,239 @@
     return Math.round(n);
   }
 
-  function collectDomMessages() {
-    const out = [];
-    const hist = document.querySelector(SEL_HISTORY);
-    if (!hist) {
-      return out;
-    }
-    let curDateMs = null;
-    const items = hist.querySelectorAll(SEL_ITEM);
-
-    items.forEach(item => {
-      const cap = item.querySelector('span.capsule, [class*="capsule"]');
-      if (cap) {
-        const d = parseCapsuleDate(cap.textContent);
-        if (d != null) curDateMs = d;
-      }
-
-      // Primary: use SEL_BUBBLE; Fallback: try generic selectors
-      let bubbles = item.querySelectorAll(SEL_BUBBLE);
-      if (bubbles.length === 0) {
-        // Fallback selectors for different MAX layouts
-        bubbles = item.querySelectorAll('[class*="bubble"], [class*="message"], [class*="content"]');
-      }
-
-      bubbles.forEach(bubble => {
-        const text = extractBubbleText(bubble);
-        if (text.length <= 2) return;
-        const ctx = bubble.closest('.messageWrapper') || bubble.closest('.block') || bubble.closest('[class*="wrapper"]') || bubble;
-
-        // Search for time in the widest context (the item element) to find HH:MM
-        const tod = nodeTimeMs(item);
-        const time = curDateMs != null ? curDateMs + tod : 0;
-
-        let reactions = 0;
-        ctx.querySelectorAll('.reaction .counter').forEach(c => {
-          const n = parseInt((c.textContent || '').trim(), 10);
-          if (!isNaN(n)) reactions += n;
-        });
-
-        let views = 0;
-        const viewEl = ctx.querySelector('[class*="views" i]');
-        if (viewEl) views = parseViews(viewEl.textContent);
-
-        const mediaUrls = rememberMedia(bubble, _linkByBubble.get(bubble));
-        rememberMessageMedia(text, time, mediaUrls);
-        out.push({
-          text,
-          token: bubbleMediaToken(bubble),
-          bubble,
-          time,
-          reactions,
-          views,
-          expectedPhoto: detectMediaType(bubble) === 'Фото',
-          mediaUrls
-        });
-      });
+  // ---- Cross-session storage ----
+  // Every reload session appends its rows to IndexedDB (survives page reloads,
+  // no meaningful size limit); the final report is built from the accumulated
+  // set, deduplicated by post link.
+  function idbOpen() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open('max_exporter', 1);
+      req.onupgradeneeded = () => {
+        try { req.result.createObjectStore('records', { keyPath: 'key' }); } catch(e) {}
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
     });
-    return out;
+  }
+  async function idbPutAll(rows) {
+    if (!rows.length) return;
+    const db = await idbOpen();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('records', 'readwrite');
+      const store = tx.objectStore('records');
+      for (const r of rows) store.put(r);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+    db.close();
+  }
+  async function idbGetAll() {
+    const db = await idbOpen();
+    const rows = await new Promise((resolve, reject) => {
+      const req = db.transaction('records', 'readonly').objectStore('records').getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+    db.close();
+    return rows;
+  }
+  async function idbClear() {
+    const db = await idbOpen();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('records', 'readwrite');
+      tx.objectStore('records').clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
   }
 
-  async function doExport(params) {
-    const {maxScrolls, format, startDate, endDate, startDateSet, endDateSet, downloadPhotos, paginationEnabled, paginationRows} = params;
+  function saveSession(st) { try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(st)); } catch(e) {} }
+  // Captured post links point at max.ru; the web app lives on web.max.ru.
+  function toWebLink(link) {
+    try {
+      const u = new URL(link);
+      if (u.hostname === 'max.ru' || u.hostname.endsWith('.max.ru')) {
+        return 'https://web.max.ru' + u.pathname + u.search;
+      }
+      return link;
+    } catch(e) { return link; }
+  }
+
+  // Let late-arriving history prepends land and capture them. A single static
+  // sweep after the scroll loop can miss messages the app was still inserting
+  // at the moment the loop broke (observed live as a missing block of messages
+  // right at the range-start boundary).
+  async function drainSweep(hist) {
+    for (let i = 0; i < 10; i++) {
+      if (SHOULD_STOP) break;
+      const domBefore = hist ? hist.querySelectorAll(SEL_ITEM).length : 0;
+      const recBefore = _records.length;
+      await processLoadedMessages(true);
+      await sleep(700);
+      const domAfter = hist ? hist.querySelectorAll(SEL_ITEM).length : 0;
+      if (domAfter === domBefore && _records.length === recBefore) break;
+    }
+  }
+
+  // Final per-session photo sweep: after the scroll loop, re-check every
+  // recorded photo bubble that ended up with no URLs — MAX may simply not have
+  // loaded the image while the bubble was passing through the viewport.
+  async function collectSessionPhotos(hist) {
+    if (!hist) return;
+    const pending = [];
+    hist.querySelectorAll(SEL_BUBBLE).forEach(bubble => {
+      const rec = _recordByBubble.get(bubble);
+      if (rec && rec.expectedPhoto && !(rec.mediaUrls && rec.mediaUrls.length)) pending.push({ bubble, rec });
+    });
+    let found = 0;
+    for (const p of pending) {
+      if (SHOULD_STOP) break;
+      p.rec.mediaUrls = await ensurePhotoUrlsForBubble(p.bubble);
+      if (p.rec.mediaUrls.length) found++;
+      setProgress(`Дозагрузка фотографий: найдено ${found} из ${pending.length}`);
+    }
+  }
+
+  // One page-reload session of the export. Memory stays bounded because the
+  // page is reloaded (deep-linking to the oldest captured post) once the
+  // retained DOM grows past sessionItemLimit; accumulated rows live in
+  // IndexedDB and survive the reloads.
+  async function doExportSession(params, st) {
+    const { maxScrolls, startDate, endDate, startDateSet, endDateSet } = params;
 
     if(!validateRequiredElements()){
       setProgress('Ошибка: не найдены элементы чата на странице');
+      sessionStorage.removeItem(SESSION_KEY);
       markPanelFinished();
       return;
     }
 
     SHOULD_STOP = false;
-
-    // Suppress "You copied the link to the post" snackbars for the whole export.
-    // Link collection triggers many copies; without this the snackbars stack up.
+    _collectMedia = !!params.downloadPhotos;
+    // Suppress "You copied the link to the post" snackbars for the whole session.
     hideToasts();
+
+    const parsedStartDate = parseInputDate(startDate);
+    const parsedEndDate = parseInputDate(endDate);
+    _startMs = parsedStartDate ? parsedStartDate.getTime() : 0;
+    _endMs = parsedEndDate ? parsedEndDate.getTime() + 86400000 : Infinity;
+    _useDateRange = !!(startDateSet && parsedStartDate) || !!(endDateSet && parsedEndDate);
+
+    _records = [];
+    _seenKeys = new Set();
+    _linksCount = 0;
+
+    const sessionItemLimit = (params.sessionItemLimit > 0) ? params.sessionItemLimit : SESSION_ITEM_LIMIT_DEFAULT;
+    const totalRoundsBudget = _useDateRange ? 9999 : Math.min(maxScrolls, 500);
+    const roundsBudget = Math.max(0, totalRoundsBudget - (st.roundsUsed || 0));
+    const maxStable = _useDateRange ? 20 : 12;
+
+    const historyEl = document.querySelector(SEL_HISTORY);
+    let stableRounds = 0;
+    let prevDomCount = 0;
+    let rounds = 0;
+    let dateReached = false;
+    let stableBreak = false;
+
+    if (!st.entryLink) {
+      // First session: scroll down to load the most recent messages — the loop
+      // will then scroll upward, loading progressively older ones. If the
+      // channel has unread messages, MAX opens it at the first unread one.
+      setProgress(`Загрузка свежих сообщений: ${historyEl ? historyEl.querySelectorAll(SEL_ITEM).length : 0}`);
+      await scrollToNewestMessages();
+    } else {
+      // Continuation session: the chat already opened AT the anchor post (via
+      // its permalink). Scrolling to the newest messages here would make the
+      // app load the entire newer history again — exactly what we avoid.
+      setProgress(`Сессия ${st.sessionNo}: продолжение с места остановки`);
+      await sleep(600);
+    }
+
+    await processLoadedMessages(false);
+
+    for (let i = 1; i <= roundsBudget; i++) {
+      if (SHOULD_STOP) break;
+
+      scrollChat('top');
+      await sleep(350);
+      rounds++;
+
+      if (_useDateRange) {
+        const oldest = getOldestVisibleDateMs();
+        if (oldest < Infinity && oldest < _startMs) {
+          setProgress(`Дата начала достигнута. Обработано всего: ${(st.totalRecords || 0) + _records.length}`);
+          dateReached = true;
+          break;
+        }
+      }
+
+      const curDomCount = historyEl ? historyEl.querySelectorAll(SEL_ITEM).length : 0;
+
+      if (curDomCount === prevDomCount) {
+        stableRounds++;
+      } else {
+        stableRounds = 0;
+        prevDomCount = curDomCount;
+      }
+
+      // Counters cover only messages inside the requested range.
+      setProgress(`Сессия ${st.sessionNo} | Шаг ${rounds} | Обработано всего: ${(st.totalRecords || 0) + _records.length} | Ссылок: ${_linksCount} | В DOM: ${curDomCount}`);
+
+      await processLoadedMessages(false);
+
+      if (stableRounds >= maxStable) { stableBreak = true; break; }
+      if (curDomCount >= sessionItemLimit) break;
+    }
+
+    await sleep(400);
+    await drainSweep(historyEl);
+
+    // Give photo records still missing their URLs a final chance to load
+    // (bubbles are centred in the viewport one by one).
+    if (_collectMedia && !SHOULD_STOP) {
+      await collectSessionPhotos(historyEl);
+    }
+
+    // Persist this session's rows (IDB put deduplicates by key across sessions).
+    await idbPutAll(_records);
+    st.totalRecords = (st.totalRecords || 0) + _records.length;
+    st.roundsUsed = (st.roundsUsed || 0) + rounds;
+
+    const roundsExhausted = !_useDateRange && st.roundsUsed >= totalRoundsBudget;
+    const terminal = SHOULD_STOP || dateReached || stableBreak || roundsExhausted;
+
+    // Continuation anchor: the oldest post with a captured link this session.
+    let anchor = null;
+    for (const r of _records) {
+      if (r.link && (anchor == null || r.time < anchor.time)) anchor = r;
+    }
+
+    if (terminal || !anchor || _records.length === 0) {
+      st.phase = 'finish';
+      saveSession(st);
+      await finishExport(params);
+      return;
+    }
+
+    // Memory cap reached mid-history: reload deep-linked to the anchor post.
+    st.sessionNo = (st.sessionNo || 1) + 1;
+    st.entryLink = toWebLink(anchor.link);
+    saveSession(st);
+    setProgress(`Сессия ${st.sessionNo - 1} завершена (всего обработано: ${st.totalRecords}). Открываю продолжение...`);
+    await sleep(500);
+    location.href = st.entryLink;
+  }
+
+  // Build and download the final report from all accumulated session rows.
+  async function finishExport(params) {
+    const { format, paginationEnabled, paginationRows, startDate, endDate, startDateSet, endDateSet, downloadPhotos } = params;
+
+    let rows = [];
+    try { rows = await idbGetAll(); } catch(e) {}
+    try { await idbClear(); } catch(e) {}
+    try { sessionStorage.removeItem(SESSION_KEY); } catch(e) {}
 
     const parsedStartDate = parseInputDate(startDate);
     const parsedEndDate = parseInputDate(endDate);
@@ -972,101 +1270,21 @@
     const endMs = parsedEndDate ? parsedEndDate.getTime() + 86400000 : Infinity;
     const useDateRange = !!(startDateSet && parsedStartDate) || !!(endDateSet && parsedEndDate);
 
-    const effectiveMaxScrolls = useDateRange ? 9999 : Math.min(maxScrolls, 500);
-    const maxStable = useDateRange ? 20 : 12;
-    let stableRounds = 0;
-    let prevDomCount = 0;
-
-    const historyEl = document.querySelector(SEL_HISTORY);
-
-    // Scroll down to load the most recent messages — the loop will then scroll
-    // upward, loading progressively older ones. If the channel has unread
-    // messages, MAX opens it at the first unread one, so the newest messages may
-    // not be loaded yet. Force-scroll to the very latest message and wait for
-    // stabilization.
-    setProgress(`Загрузка свежих сообщений: ${historyEl ? historyEl.querySelectorAll(SEL_ITEM).length : 0}`);
-    await scrollToNewestMessages();
-
-    // Collect links for initially visible messages
-    setProgress(`Сбор ссылок: ${historyEl ? historyEl.querySelectorAll(SEL_ITEM).length : 0}`);
-    await collectLinksForVisible();
-
-    for(let i = 1; i <= effectiveMaxScrolls; i++){
-      if(SHOULD_STOP) break;
-
-      scrollChat('top');
-      await sleep(350);
-
-      if(useDateRange) {
-        const oldest = getOldestVisibleDateMs();
-        if(oldest < Infinity && oldest < startMs) {
-          setProgress(`Дата начала достигнута. Сообщений: ${historyEl ? historyEl.querySelectorAll(SEL_ITEM).length : 0}`);
-          break;
-        }
-      }
-
-      const curDomCount = historyEl ? historyEl.querySelectorAll(SEL_ITEM).length : 0;
-
-      if(curDomCount === prevDomCount) {
-        stableRounds++;
-      } else {
-        stableRounds = 0;
-        prevDomCount = curDomCount;
-      }
-
-      setProgress(`Шаг ${i}/${effectiveMaxScrolls} | Сообщений: ${curDomCount} | Ссылок: ${_linkByClean.size}`);
-
-      // Collect links for newly visible messages
-      await collectLinksForVisible();
-
-      if(stableRounds >= maxStable) break;
-    }
-
-    // MAX lazy-loads old image thumbnails only while their bubbles are visible.
-    // Run the extra media scan only when the user requested media downloads.
-    if (downloadPhotos) {
-      await scanLoadedHistoryForPhotos();
-    }
-    await sleep(1000);
-
-    const collected = collectDomMessages();
-
-    // The post link is the only stable unique identifier (MAX exposes no message
-    // id in the DOM, and caption-less media posts collide on text/media tokens).
-    // Capture a link for every collected bubble before deduping.
-    await fillMissingLinks(collected);
-
-    // Resolve the channel slug AFTER link collection: the canonical slug is
-    // embedded in the captured post links, so we need them populated first.
+    // Resolve the channel slug: prefer the slug embedded in captured links.
     const slug = await findChannelSlug();
 
-    const seen = new Set();
-    let results = [];
-
-    for (const m of collected) {
-      const link = (m.bubble && _linkByBubble.get(m.bubble)) || '';
-      const key = link || identityKey(m.text, m.token);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      if (isExcludedMessage(m.text)) continue;
-      m._link = link;
-      results.push(m);
-    }
-
-    if(useDateRange) {
+    let results = rows;
+    if (useDateRange) {
       results = results.filter(m => m.time >= startMs && m.time <= endMs);
     }
-
     results.sort((a, b) => a.time - b.time);
 
     let photoNumber = 0;
     const photoJobs = [];
     const out = results.map(m => {
-      const urls = [...new Set([
-        ...(m.mediaUrls || []),
-        ...(_mediaByLink.get(m._link) || []),
-        ...(_mediaByMessage.get(messageMediaKey(m.text, m.time)) || [])
-      ])];
+      // Media URLs are only collected while downloadPhotos was enabled; rows
+      // from older runs (or text-only posts) simply carry an empty list.
+      const urls = downloadPhotos ? [...new Set(m.mediaUrls || [])] : [];
       const mediaFiles = urls.map((url, index) => {
         photoNumber++;
         const datePart = m.time ? `${new Date(m.time).getFullYear()}-${pad(new Date(m.time).getMonth() + 1)}-${pad(new Date(m.time).getDate())}` : 'unknown-date';
@@ -1076,7 +1294,7 @@
       });
       return {
         datetime: m.time ? formatTime(m.time) : '',
-        post_link: m._link || '',
+        post_link: m.link || '',
         text: m.text,
         media_files: mediaFiles,
         media_urls: urls,
@@ -1136,10 +1354,10 @@
         setProgress(`Ошибки скачивания:\n${downloadErrors.join('\n')}`);
       } else {
         const partInfo = totalParts > 1 ? ` в ${totalParts} файлах (${chunkSize} строк/файл)` : '';
+        const photoInfo = downloadPhotos ? `
+Фото: ${photoJobs.length}, не найдено у сообщений: ${missingPhotoMessages}` : '';
         setProgress(`Готово.
-${format.toUpperCase()}: ${out.length} сообщений${partInfo}
-Фото: ${photoJobs.length}${downloadPhotos ? ' + отдельные файлы' : ' найдено'}
-Не найдено фото у сообщений: ${missingPhotoMessages}
+${format.toUpperCase()}: ${out.length} сообщений${partInfo}${photoInfo}
 Файлы сохранены в папке по умолчанию.`);
       }
     } catch (e) {
@@ -1164,6 +1382,7 @@ ${format.toUpperCase()}: ${out.length} сообщений${partInfo}
       _resolvedSlug = null;
       RUNNING = true;
       sendResponse({ok:true});
+      try { sessionStorage.removeItem(SESSION_KEY); } catch(e) {}
       sessionStorage.setItem('max_export_pending', JSON.stringify(msg));
       location.reload();
       return;
