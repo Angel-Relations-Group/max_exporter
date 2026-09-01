@@ -43,23 +43,36 @@
   let _capturedLink = null;
 
   // ---- Photo URL discovery (batch media download) ----
-  // MAX renders photos lazily: an <img> outside the viewport may have no src
-  // yet, and a loaded one exposes several candidates (currentSrc, src, srcset,
-  // data-attrs, CSS backgrounds). Collect every plausible URL per bubble and
-  // merge across passes; the final report lists them and the download step
-  // fetches each into a per-export media/ folder.
+  // MAX renders photos lazily: an <img> outside the viewport keeps a tiny
+  // data:-URI placeholder instead of its src, and a loaded one exposes its CDN
+  // link (i.oneme.ru). Collect real http(s) URLs per bubble and merge across
+  // passes; the final report lists them and the download step fetches each at
+  // original quality into a per-export media/ folder.
 
-  function bestSrcFromImg(img) {
-    const candidates = [];
-    if (img.currentSrc) candidates.push(img.currentSrc);
-    const src = img.getAttribute('src');
-    if (src) candidates.push(src);
-    const srcset = img.getAttribute('srcset') || '';
-    srcset.split(',').forEach(part => {
-      const url = part.trim().split(/\s+/)[0];
-      if (url) candidates.push(url);
-    });
-    return candidates.filter(Boolean).pop() || '';
+  // Real (downloadable) photo URLs of one <img>, best first. MAX renders photos
+  // lazily: until an image enters the viewport its src holds a tiny inlined
+  // webp placeholder (data:image/webp;base64 — a blurred LQIP of a few hundred
+  // bytes). Placeholders are never real media, so only http(s) URLs qualify.
+  function imgRealUrls(img) {
+    const urls = [];
+    const push = (raw) => {
+      if (!raw) return;
+      const url = normalizeMediaUrl(raw);
+      if (url && /^https?:/.test(url)) urls.push(url);
+    };
+    push(img.currentSrc);
+    push(img.getAttribute('src'));
+    // srcset variants, largest width descriptor first (rarely used by MAX).
+    (img.getAttribute('srcset') || '').split(',').map(s => s.trim()).filter(Boolean)
+      .map(part => {
+        const m = part.match(/^(\S+)(?:\s+(\d+)w)?$/);
+        return m ? { url: m[1], w: m[2] ? parseInt(m[2], 10) : 0 } : null;
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.w - a.w)
+      .forEach(v => push(v.url));
+    ['data-src', 'data-original', 'data-url'].forEach(a => push(img.getAttribute(a)));
+    return [...new Set(urls)];
   }
 
   function normalizeMediaUrl(url) {
@@ -95,34 +108,39 @@
     const media = findPhotoMedia(content);
     if (!media) return [];
     const found = [];
+    // One best URL per <img> (previously every candidate variant was kept and
+    // later saved as a separate file, flooding media/ with duplicates).
     media.querySelectorAll('img').forEach(img => {
       const width = img.naturalWidth || img.clientWidth || 0;
       const height = img.naturalHeight || img.clientHeight || 0;
       if (width && height && width * height < 40000) return;
-      const attrs = ['src', 'data-src', 'data-original', 'data-url'];
-      const urls = [bestSrcFromImg(img), ...attrs.map(a => img.getAttribute(a) || '')];
-      urls.forEach(raw => {
-        const url = normalizeMediaUrl(raw);
-        if (url) found.push(url);
-      });
+      const urls = imgRealUrls(img);
+      if (urls.length) found.push(urls[0]);
     });
     media.querySelectorAll('source').forEach(srcsetEl => {
-      const srcset = srcsetEl.getAttribute('srcset') || '';
-      srcset.split(',').forEach(part => {
-        const url = normalizeMediaUrl(part.trim().split(/\s+/)[0]);
-        if (url) found.push(url);
-      });
+      const part = (srcsetEl.getAttribute('srcset') || '').split(',').map(s => s.trim()).filter(Boolean).pop();
+      if (!part) return;
+      const url = normalizeMediaUrl(part.split(/\s+/)[0]);
+      if (url && /^https?:/.test(url)) found.push(url);
     });
+    // Only direct image links: a plain <a> inside .media is usually the target
+    // article of a link preview — downloading it would save an HTML page.
     media.querySelectorAll('a[href]').forEach(a => {
       const href = normalizeMediaUrl(a.getAttribute('href'));
-      if (href && !href.startsWith('https://max.ru/') && !href.startsWith('https://web.max.ru/')) found.push(href);
+      if (href && /^https?:/.test(href) &&
+          (/^https:\/\/i\.oneme\.ru\//.test(href) || /\.(jpe?g|png|webp|gif|bmp)(\?|$)/i.test(href))) {
+        found.push(href);
+      }
     });
     media.querySelectorAll('*').forEach(el => {
       const bg = getComputedStyle(el).backgroundImage || '';
       const match = bg.match(/^url\(["']?(.*?)["']?\)$/);
-      if (match) found.push(normalizeMediaUrl(match[1]));
+      if (match) {
+        const url = normalizeMediaUrl(match[1]);
+        if (url && /^https?:/.test(url)) found.push(url);
+      }
     });
-    return [...new Set(found.filter(url => /^https?:|^blob:|^data:image\//.test(url)))];
+    return [...new Set(found)];
   }
 
   // Merge freshly discovered URLs into the per-bubble set (images keep loading
@@ -840,12 +858,15 @@
   }
 
   // Sends the file content to the background, which builds a blob and saves it
-  // via chrome.downloads. Resolves with the background response, or an error
-  // from chrome.runtime.lastError / a missing response.
-  function downloadFile(content, filename, mime){
+  // via chrome.downloads. `isBase64` switches the payload to raw media bytes.
+  // Resolves with the background response, or an error from
+  // chrome.runtime.lastError / a missing response.
+  function downloadFile(content, filename, mime, isBase64){
     return new Promise((resolve) => {
+      const msg = { type: 'MAX_EXPORT_DOWNLOAD', content, filename, mime };
+      if (isBase64) msg.base64 = true;
       chrome.runtime.sendMessage(
-        { type: 'MAX_EXPORT_DOWNLOAD', content, filename, mime },
+        msg,
         (resp) => {
           const err = chrome.runtime.lastError;
           if (err) resolve({ ok: false, error: err.message });
@@ -884,6 +905,73 @@
       if (m && /^(?:jpe?g|png|webp|heic|gif|bmp|tiff?)$/i.test(m[1])) return m[1].toLowerCase().replace('jpeg', 'jpg');
     } catch(e) {}
     return 'jpg';
+  }
+
+  // ---- Original-quality media download ----
+  // Chat photo links on i.oneme.ru point at a lossy webp preview sized for the
+  // chat bubble. The app's own photo viewer "Скачать" button re-requests the
+  // exact same link with &fn=external_28, and the CDN then returns the uploaded
+  // original (usually JPEG, 2-3x larger at identical pixel size). Speed is
+  // explicitly secondary here — the point of the option is usable quality.
+  function originalQualityUrl(url) {
+    try {
+      const u = new URL(url);
+      if (u.hostname !== 'i.oneme.ru' || u.searchParams.has('fn')) return url;
+      u.searchParams.set('fn', 'external_28');
+      return u.href;
+    } catch(e) { return url; }
+  }
+
+  function extFromContentType(mime) {
+    switch ((mime || '').split(';')[0].trim().toLowerCase()) {
+      case 'image/jpeg': return 'jpg';
+      case 'image/png': return 'png';
+      case 'image/webp': return 'webp';
+      case 'image/gif': return 'gif';
+      case 'image/bmp': return 'bmp';
+      case 'image/heic':
+      case 'image/heif': return 'heic';
+      case 'image/tiff': return 'tif';
+      default: return '';
+    }
+  }
+
+  function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(String(fr.result).split(',')[1] || '');
+      fr.onerror = () => reject(fr.error || new Error('FileReader error'));
+      fr.readAsDataURL(blob);
+    });
+  }
+
+  // Fetch the original-quality bytes from the page context (the CDN serves
+  // CORS headers — the viewer itself fetches these links the same way), name
+  // the file by the actual Content-Type and save it via the background. If the
+  // fetch is blocked, fall back to a plain background URL download. Resolves
+  // {filename, bytes} on success or {error}.
+  async function saveOriginalMedia(url, filenameNoExt) {
+    const urlOrig = originalQualityUrl(url);
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 120000);
+      const resp = await fetch(urlOrig, { credentials: 'omit', signal: ctrl.signal });
+      clearTimeout(timer);
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const mime = (resp.headers.get('content-type') || '').split(';')[0].trim();
+      const blob = await resp.blob();
+      if (!blob.size) throw new Error('пустой ответ');
+      const ext = extFromContentType(mime) || extensionFromUrl(urlOrig);
+      const filename = `${filenameNoExt}.${ext}`;
+      const r = await downloadFile(await blobToBase64(blob), filename, mime || 'application/octet-stream', true);
+      if (!r || !r.ok) throw new Error((r && r.error) || 'не сохранено');
+      return { filename, bytes: blob.size };
+    } catch (e) {
+      const filename = `${filenameNoExt}.${extensionFromUrl(urlOrig)}`;
+      const r = await downloadUrl(urlOrig, filename);
+      if (r && r.ok) return { filename, bytes: 0 };
+      return { filename: null, error: ((r && r.error) || e.message || String(e)) };
+    }
   }
 
   function getScrollable() {
@@ -1281,22 +1369,24 @@
 
     let photoNumber = 0;
     const photoJobs = [];
-    const out = results.map(m => {
+    const out = results.map((m, rowIndex) => {
       // Media URLs are only collected while downloadPhotos was enabled; rows
       // from older runs (or text-only posts) simply carry an empty list.
       const urls = downloadPhotos ? [...new Set(m.mediaUrls || [])] : [];
-      const mediaFiles = urls.map((url, index) => {
+      const jobs = urls.map((url, index) => {
         photoNumber++;
         const datePart = m.time ? `${new Date(m.time).getFullYear()}-${pad(new Date(m.time).getMonth() + 1)}-${pad(new Date(m.time).getDate())}` : 'unknown-date';
-        const filename = `${datePart}_${String(photoNumber).padStart(5, '0')}_${String(index + 1).padStart(2, '0')}.${extensionFromUrl(url)}`;
-        photoJobs.push({ url, filename });
-        return filename;
+        photoJobs.push({
+          rowIndex,
+          url,
+          base: `${datePart}_${String(photoNumber).padStart(5, '0')}_${String(index + 1).padStart(2, '0')}`
+        });
       });
       return {
         datetime: m.time ? formatTime(m.time) : '',
         post_link: m.link || '',
         text: m.text,
-        media_files: mediaFiles,
+        media_files: [],
         media_urls: urls,
         expected_photo: !!m.expectedPhoto,
         views: m.views || '',
@@ -1316,7 +1406,37 @@
       const chunkSize = (paginationEnabled && paginationRows > 0) ? paginationRows : out.length;
       const totalParts = Math.ceil(out.length / chunkSize);
 
+      // Media first: originals are fetched one by one (quality over speed) and
+      // the file extension depends on what the CDN actually returns, so the
+      // report is written afterwards and lists the exact saved filenames.
       let downloadErrors = [];
+      let photoBytes = 0;
+      let photosSaved = 0;
+      if (downloadPhotos && photoJobs.length && !SHOULD_STOP) {
+        for (let i = 0; i < photoJobs.length; i++) {
+          if (SHOULD_STOP) break;
+          const job = photoJobs[i];
+          setProgress(`Скачивание фото (${i + 1} из ${photoJobs.length})...`);
+          const res = await saveOriginalMedia(job.url, `${exportFolder}/media/${job.base}`);
+          if (res.filename) {
+            job.filename = res.filename.split('/').pop();
+            photoBytes += res.bytes || 0;
+            photosSaved++;
+          } else {
+            downloadErrors.push(`Фото ${job.base}: ${res.error || 'ошибка'}`);
+          }
+          await sleep(80);
+        }
+      }
+      const filesByRow = new Map();
+      photoJobs.forEach(job => {
+        if (!job.filename) return;
+        const list = filesByRow.get(job.rowIndex) || [];
+        list.push(job.filename);
+        filesByRow.set(job.rowIndex, list);
+      });
+      out.forEach((row, rowIndex) => { row.media_files = filesByRow.get(rowIndex) || []; });
+
       for (let part = 0; part < totalParts; part++) {
         if (SHOULD_STOP) break;
         const chunk = out.slice(part * chunkSize, (part + 1) * chunkSize);
@@ -1337,25 +1457,13 @@
         }
       }
 
-      if (downloadPhotos && !SHOULD_STOP) {
-        for (let i = 0; i < photoJobs.length; i++) {
-          if (SHOULD_STOP) break;
-          const job = photoJobs[i];
-          setProgress(`Скачивание фото ${i + 1} из ${photoJobs.length}...`);
-          const resp = await downloadUrl(job.url, `${exportFolder}/media/${job.filename}`);
-          if (!resp || !resp.ok) {
-            downloadErrors.push(`Фото ${job.filename}: ${(resp && (resp.error || resp.state)) || 'ошибка'}`);
-          }
-          await sleep(80);
-        }
-      }
-
       if (downloadErrors.length) {
         setProgress(`Ошибки скачивания:\n${downloadErrors.join('\n')}`);
       } else {
         const partInfo = totalParts > 1 ? ` в ${totalParts} файлах (${chunkSize} строк/файл)` : '';
+        const sizeInfo = photoBytes ? `, ${(photoBytes / 1048576).toFixed(1)} МБ` : '';
         const photoInfo = downloadPhotos ? `
-Фото: ${photoJobs.length}, не найдено у сообщений: ${missingPhotoMessages}` : '';
+Фото (оригиналы): ${photosSaved}, не найдено у сообщений: ${missingPhotoMessages}${sizeInfo}` : '';
         setProgress(`Готово.
 ${format.toUpperCase()}: ${out.length} сообщений${partInfo}${photoInfo}
 Файлы сохранены в папке по умолчанию.`);

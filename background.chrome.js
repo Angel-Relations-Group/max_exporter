@@ -39,19 +39,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   const mime = (msg.mime || 'text/plain').replace(/;\s*$/, '');
 
-  // SW: TextEncoder -> binary string -> base64 (in chunks, avoiding stack overflow)
-  function buildUrl() {
-    const bytes = new TextEncoder().encode(msg.content);
-    let bin = '';
-    for (let i = 0; i < bytes.length; i += 0x8000) {
-      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-    }
-    return 'data:' + mime + ';base64,' + btoa(bin);
-  }
-
   let url;
   try {
-    url = buildUrl();
+    if (msg.base64) {
+      // Binary payload (media originals): the content is already base64.
+      url = 'data:' + mime + ';base64,' + msg.content;
+    } else {
+      // SW: TextEncoder -> binary string -> base64 (in chunks, avoiding stack overflow)
+      const bytes = new TextEncoder().encode(msg.content);
+      let bin = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) {
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+      }
+      url = 'data:' + mime + ';base64,' + btoa(bin);
+    }
   } catch (e) {
     sendResponse({ ok: false, error: 'подготовка URL: ' + e.message });
     return false;
@@ -69,7 +70,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const s = delta.state.current;
         if (s === 'complete' || s === 'interrupted') onDone(s);
       };
-      const timer = setTimeout(() => onDone('timeout'), 30000); // safety net for the response channel
+      const timer = setTimeout(() => onDone('timeout'), msg.base64 ? 120000 : 30000); // safety net for the response channel
       chrome.downloads.onChanged.addListener(onChange);
     })
     .catch(err => {

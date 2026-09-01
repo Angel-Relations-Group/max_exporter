@@ -42,7 +42,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   let url;
   try {
-    const blob = new Blob([msg.content], { type: mime });
+    let blob;
+    if (msg.base64) {
+      // Binary payload (media originals): decode base64 to bytes.
+      const bin = atob(msg.content);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      blob = new Blob([bytes], { type: mime });
+    } else {
+      blob = new Blob([msg.content], { type: mime });
+    }
     url = URL.createObjectURL(blob);
   } catch (e) {
     sendResponse({ ok: false, error: 'подготовка URL: ' + e.message });
@@ -64,7 +73,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           onDone(delta.state.current);
         }
       };
-      const timer = setTimeout(() => onDone('timeout'), 30000); // safety net for the response channel
+      const timer = setTimeout(() => onDone('timeout'), msg.base64 ? 120000 : 30000); // safety net for the response channel
       chrome.downloads.onChanged.addListener(onChange);
     })
     .catch(err => {

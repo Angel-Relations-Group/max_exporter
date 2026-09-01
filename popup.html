@@ -1,67 +1,134 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>MAX Export</title>
 <style>
-body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:12px;min-width:320px}
-.row{margin:10px 0}
-label{display:block;font-weight:600;margin-bottom:6px}
-input,select{width:100%;padding:8px;font-size:13px;box-sizing:border-box}
-button{width:100%;padding:10px;font-size:13px;cursor:pointer;margin-top:8px}
-.hint{color:#555;font-size:12px;line-height:1.35}
-.status{margin-top:8px;font-size:12px;white-space:pre-wrap}
+  :root { color-scheme: light; }
+  body {
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    font-size: 13px;
+    width: 330px;
+    margin: 0;
+    padding: 12px;
+    background: #f6f7f9;
+    color: #1c1e21;
+  }
+  h1 {
+    font-size: 15px;
+    margin: 0 0 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .logo {
+    width: 22px; height: 22px; border-radius: 6px;
+    background: linear-gradient(135deg, #4f7dff, #a44dff);
+    display: inline-flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 700; font-size: 12px;
+  }
+  .intro { font-size: 12px; color: #374151; margin: 0 0 10px; }
+  .field { margin-bottom: 9px; }
+  .field label { display: block; font-weight: 600; margin-bottom: 3px; }
+  .field input[type="number"], .field input[type="date"], .field select {
+    width: 100%; box-sizing: border-box;
+    padding: 5px 7px; border: 1px solid #c4c9cf; border-radius: 6px;
+    background: #fff; font: inherit;
+  }
+  .hint { color: #6b7280; font-size: 11px; margin-top: 2px; }
+  .row2 { display: flex; gap: 8px; }
+  .row2 > .field { flex: 1; }
+  .check { display: flex; align-items: center; gap: 7px; }
+  .check input { margin: 0; }
+  .check label { font-weight: 600; margin: 0; cursor: pointer; }
+  #paginationFields {
+    background: #eceef2; border-radius: 8px; padding: 8px; margin-top: 5px;
+  }
+  #paginationFields .field { margin-bottom: 0; }
+  .buttons { display: flex; gap: 8px; margin-top: 12px; }
+  button {
+    flex: 1; padding: 8px 6px; border: 0; border-radius: 8px;
+    background: #6a4dff; color: #fff; font: inherit; font-weight: 600;
+    cursor: pointer;
+  }
+  button:hover { background: #5940e0; }
+  button.stop { background: #d93025; }
+  button.stop:hover { background: #b3261e; }
+  #status {
+    margin-top: 10px; font-size: 12px; white-space: pre-wrap;
+    max-height: 90px; overflow-y: auto;
+  }
+  #status.err { color: #d93025; }
+  #status.ok { color: #188038; }
+  .privacy { margin-top: 10px; }
+  .credits {
+    margin-top: 12px; text-align: center; font-size: 11px; color: #999;
+  }
+  .credits a { color: #999; }
 </style>
 </head>
 <body>
-  <div class="row">
-    <div class="hint">Откройте доступный вам канал или чат MAX на активной вкладке, выберите параметры и нажмите «Экспорт».</div>
+  <h1><span class="logo">M</span> MAX Export</h1>
+  <p class="intro">Откройте доступный вам канал или чат MAX на активной вкладке, выберите параметры и нажмите «Экспорт».</p>
+
+  <div class="field">
+    <label for="maxScrolls">Шаги прокрутки</label>
+    <input type="number" id="maxScrolls" min="5" max="500" value="5">
+    <div class="hint">Сколько шагов прокрутки истории назад. Игнорируется, если указана начальная дата.</div>
   </div>
-  <div class="row">
-    <label>Шаги прокрутки</label>
-    <input id="maxScrolls" type="number" min="5" max="500" value="5" />
-    <div class="hint">Если указана начальная дата – поле игнорируется</div>
+
+  <div class="row2">
+    <div class="field">
+      <label for="startDate">Начальная дата</label>
+      <input type="date" id="startDate">
+    </div>
+    <div class="field">
+      <label for="endDate">Конечная дата</label>
+      <input type="date" id="endDate">
+    </div>
   </div>
-  <div class="row">
-    <label>Начальная дата (необязательно)</label>
-    <input id="startDate" type="date" />
-    <div class="hint">Если указана – экспорт начнётся с этой даты</div>
-  </div>
-  <div class="row">
-    <label>Конечная дата (необязательно)</label>
-    <input id="endDate" type="date" />
-    <div class="hint">Если указана – экспорт закончится этой датой</div>
-  </div>
-  <div class="row">
-    <label>Формат</label>
+  <div class="hint" style="margin: -4px 0 9px">Необязательные поля. Начальная – экспорт начнётся с этой даты, конечная – экспорт закончится этой датой (включительно).</div>
+
+  <div class="field">
+    <label for="format">Формат</label>
     <select id="format">
-      <option value="csv">CSV для Excel</option>
+      <option value="csv" selected>CSV для Excel</option>
       <option value="json">JSON</option>
     </select>
   </div>
-  <div class="row">
-    <label style="display:flex;align-items:center;gap:8px;margin-bottom:0;cursor:pointer">
-      <input id="downloadPhotos" type="checkbox" style="width:auto" />
-      Скачать изображения из экспортируемых сообщений
-    </label>
-    <div class="hint">Изображения будут сохранены в отдельной папке media рядом с файлом экспорта</div>
+
+  <div class="field">
+    <span class="check">
+      <input type="checkbox" id="downloadPhotos">
+      <label for="downloadPhotos">Скачать изображения из сообщений</label>
+    </span>
+    <div class="hint">Изображения будут скачаны в оригинальном качестве в отдельную папку media рядом с файлом экспорта.</div>
   </div>
-  <div class="row">
-    <label style="display:flex;align-items:center;gap:8px;margin-bottom:0;cursor:pointer">
-      <input id="paginationEnabled" type="checkbox" style="width:auto" />
-      Пагинация
-    </label>
-    <div id="paginationFields" style="display:none;margin-top:6px;">
-      <input id="paginationRows" type="number" min="10" max="100000" value="350" />
-      <div class="hint">Макс. количество строк в одном отчете</div>
+
+  <div class="field">
+    <span class="check">
+      <input type="checkbox" id="paginationEnabled">
+      <label for="paginationEnabled">Пагинация</label>
+    </span>
+    <div id="paginationFields" hidden>
+      <div class="field">
+        <label for="paginationRows">Строк в файле</label>
+        <input type="number" id="paginationRows" min="10" max="100000" value="350">
+        <div class="hint">Макс. количество строк в одном отчёте</div>
+      </div>
     </div>
   </div>
-  <button id="run">Экспорт</button>
-  <button id="stop" style="display:none;">Стоп</button>
-  <div id="status" class="status"></div>
-  <div class="hint">❗Расширение работает локально в браузере и не&nbsp;отправляет никакие данные на внешние серверы.</div>
-  <div style="margin-top:12px;text-align:center;font-size:11px;color:#999;">developed by <a href="https://arg.tools" target="_blank" style="color:#999;">arg.tools</a></div>
-<script src="popup.js"></script>
+
+  <div class="buttons">
+    <button id="run">Экспорт</button>
+    <button id="stop" class="stop" hidden>Стоп</button>
+  </div>
+
+  <div id="status"></div>
+  <div class="hint privacy">❗Расширение работает локально в браузере и не&nbsp;отправляет никакие данные на внешние серверы.</div>
+  <div class="credits">developed by <a href="https://arg.tools" target="_blank">arg.tools</a></div>
+
+  <script src="popup.js"></script>
 </body>
 </html>
