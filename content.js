@@ -36,7 +36,6 @@
   window.addEventListener('popstate', resetOnNavigate);
 
   const _linkByClean = new Map();   // identityKey -> post link (progress counter)
-  const _linkByBubble = new WeakMap(); // bubble element -> post link (primary identity)
   const _mediaByBubble = new WeakMap(); // bubble element -> discovered photo URLs
   const _recordByBubble = new WeakMap(); // bubble element -> this session's record (photo pass)
   let _collectMedia = false; // "download photos" enabled — collect image URLs while scanning
@@ -49,30 +48,20 @@
   // passes; the final report lists them and the download step fetches each at
   // original quality into a per-export media/ folder.
 
-  // Real (downloadable) photo URLs of one <img>, best first. MAX renders photos
-  // lazily: until an image enters the viewport its src holds a tiny inlined
-  // webp placeholder (data:image/webp;base64 — a blurred LQIP of a few hundred
-  // bytes). Placeholders are never real media, so only http(s) URLs qualify.
-  function imgRealUrls(img) {
-    const urls = [];
-    const push = (raw) => {
-      if (!raw) return;
-      const url = normalizeMediaUrl(raw);
-      if (url && /^https?:/.test(url)) urls.push(url);
-    };
-    push(img.currentSrc);
-    push(img.getAttribute('src'));
-    // srcset variants, largest width descriptor first (rarely used by MAX).
-    (img.getAttribute('srcset') || '').split(',').map(s => s.trim()).filter(Boolean)
-      .map(part => {
-        const m = part.match(/^(\S+)(?:\s+(\d+)w)?$/);
-        return m ? { url: m[1], w: m[2] ? parseInt(m[2], 10) : 0 } : null;
-      })
-      .filter(Boolean)
-      .sort((a, b) => b.w - a.w)
-      .forEach(v => push(v.url));
-    ['data-src', 'data-original', 'data-url'].forEach(a => push(img.getAttribute(a)));
-    return [...new Set(urls)];
+  // First real (downloadable) URL of one <img>: currentSrc, then src, then the
+  // last (largest) srcset candidate. MAX renders photos lazily: until an image
+  // enters the viewport its src holds a tiny inlined webp placeholder
+  // (data:image/webp;base64 — a blurred LQIP of a few hundred bytes), so only
+  // http(s) URLs qualify.
+  function imgRealUrl(img) {
+    const candidates = [img.currentSrc, img.getAttribute('src')];
+    const srcset = (img.getAttribute('srcset') || '').trim();
+    if (srcset) candidates.push(srcset.split(',').pop().trim().split(/\s+/)[0]);
+    for (const raw of candidates) {
+      const url = raw && normalizeMediaUrl(raw);
+      if (url && /^https?:/.test(url)) return url;
+    }
+    return '';
   }
 
   function normalizeMediaUrl(url) {
@@ -114,8 +103,8 @@
       const width = img.naturalWidth || img.clientWidth || 0;
       const height = img.naturalHeight || img.clientHeight || 0;
       if (width && height && width * height < 40000) return;
-      const urls = imgRealUrls(img);
-      if (urls.length) found.push(urls[0]);
+      const url = imgRealUrl(img);
+      if (url) found.push(url);
     });
     media.querySelectorAll('source').forEach(srcsetEl => {
       const part = (srcsetEl.getAttribute('srcset') || '').split(',').map(s => s.trim()).filter(Boolean).pop();
@@ -239,10 +228,9 @@
     }
   }
 
-  // Store a captured post link under both identity maps. The post link is the only
-  // stable unique id; text/media tokens can collide, so it is the dedup key.
-  function storeLink(bubble, link, text, token) {
-    _linkByBubble.set(bubble, link);
+  // Store a captured post link under its identity key. The post link is the
+  // only stable unique id; text/media tokens can collide, so it is the dedup key.
+  function storeLink(link, text, token) {
     const dc = identityKey(text, token);
     if (!_linkByClean.has(dc)) _linkByClean.set(dc, link);
   }
@@ -307,7 +295,7 @@
     let views = 0;
     const viewEl = ctx.querySelector('[class*="views" i]');
     if (viewEl) views = parseViews(viewEl.textContent);
-    const rec = { key: link || ('i:' + idKey), link: link || '', text, time, views, reactions };
+    const rec = { key: link || ('i:' + idKey), idKey, link: link || '', text, time, views, reactions };
     if (_collectMedia) {
       rec.mediaUrls = rememberMedia(bubble);
       rec.expectedPhoto = detectMediaType(bubble) === 'Фото';
@@ -372,10 +360,8 @@
           _bubbleTries.set(bubble, tries);
           if (!SHOULD_STOP && tries <= _MAX_CAPTURE_TRIES) {
             link = await getLinkForBubble(bubble);
-            if (link) storeLink(bubble, link, text, token);
+            if (link) storeLink(link, text, token);
           }
-        } else {
-          _linkByBubble.set(bubble, link);
         }
         if (link) {
           _doneBubbles.add(bubble);
@@ -399,13 +385,6 @@
     }
   }
 
-  // Determine the media type of a bubble that has no caption text.
-  // Looks at the attachment block: div.sticker => Sticker, div.videoMessage
-  // (round video / "circle" rendered on a canvas) => Circle, div.media
-  // (div.video/<video> => Video, <audio>/.audio => Audio, <img>/.image => Photo),
-  // or div.attaches => File. For audio/video/file the on-screen filename is
-  // appended after the type ("File: report.pdf"); stickers, circles and photos
-  // expose no filename and stay type-only.
   // Extract the on-screen filename for an audio/video/file attachment. Returns ''
   // when none is exposed (photo grids, voice messages, stickers, circles and
   // caption-less media clips have no filename in the DOM).
@@ -438,6 +417,13 @@
 
   function lbl(type, n){ return n ? type + ': ' + n : type; }
 
+  // Determine the media type of a bubble that has no caption text.
+  // Looks at the attachment block: div.sticker => Sticker, div.videoMessage
+  // (round video / "circle" rendered on a canvas) => Circle, div.media
+  // (div.video/<video> => Video, <audio>/.audio => Audio, <img>/.image => Photo),
+  // or div.attaches => File. For audio/video/file the on-screen filename is
+  // appended after the type ("File: report.pdf"); stickers, circles and photos
+  // expose no filename and stay type-only.
   function detectMediaType(bubble) {
     const content = bubble.querySelector('.bubbleContent') || bubble;
     const photoMedia = findPhotoMedia(content);
@@ -728,6 +714,7 @@
 
       for (let i = 0; i < 60; i++) {
         await sleep(1000);
+        if (SHOULD_STOP) break;
         if (document.querySelector(SEL_HISTORY) &&
             document.querySelector(SEL_ITEM)) break;
       }
@@ -736,6 +723,7 @@
       let stable = 0;
       while (stable < 3) {
         await sleep(1000);
+        if (SHOULD_STOP) break;
         const hist = document.querySelector(SEL_HISTORY);
         const domCount = hist ? hist.querySelectorAll(SEL_ITEM).length : 0;
         setProgress(`Ожидание загрузки... Сообщений: ${domCount}`);
@@ -828,6 +816,19 @@
     return date;
   }
 
+  // Resolve the popup's date inputs into a [startMs, endMs] range. The end
+  // date is inclusive (through the end of that day); an unbounded side is
+  // 0 / Infinity. `use` is false when no date is set.
+  function resolveDateRange(params) {
+    const start = parseInputDate(params.startDate);
+    const end = parseInputDate(params.endDate);
+    return {
+      startMs: start ? start.getTime() : 0,
+      endMs: end ? end.getTime() + 86400000 : Infinity,
+      use: !!start || !!end
+    };
+  }
+
   function formatTime(epochMs) {
     if (!epochMs) return '';
     const d = new Date(epochMs);
@@ -837,6 +838,9 @@
   function csvSafe(v){
     let s = v == null ? '' : String(v);
     s = s.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    // Excel runs a cell as a formula even inside quotes when it starts with
+    // =, +, - or @ — prefix such values with ' to keep post text inert.
+    if (/^[=+\-@]/.test(s)) s = "'" + s;
     return '"' + s.replace(/"/g, '""') + '"';
   }
 
@@ -857,42 +861,20 @@
     return '\uFEFF' + lines.join('\r\n');
   }
 
-  // Sends the file content to the background, which builds a blob and saves it
-  // via chrome.downloads. `isBase64` switches the payload to raw media bytes.
-  // Resolves with the background response, or an error from
-  // chrome.runtime.lastError / a missing response.
-  function downloadFile(content, filename, mime, isBase64){
-    return new Promise((resolve) => {
-      const msg = { type: 'MAX_EXPORT_DOWNLOAD', content, filename, mime };
-      if (isBase64) msg.base64 = true;
-      chrome.runtime.sendMessage(
-        msg,
-        (resp) => {
-          const err = chrome.runtime.lastError;
-          if (err) resolve({ ok: false, error: err.message });
-          else resolve(resp || { ok: false, error: 'нет ответа от фоновой службы (перезагрузите расширение)' });
-        }
-      );
-    });
-  }
-
   function validateRequiredElements(){
     return !!(document.querySelector(SEL_HISTORY) && document.querySelector(SEL_ITEM));
   }
 
-  // Ask the background to download a remote URL (chat media) via
-  // chrome.downloads. Resolves with the background response, or an error from
-  // chrome.runtime.lastError / a missing response.
-  function downloadUrl(url, filename){
+  // Send a message to the background (file save / URL download) and resolve
+  // with its response, or an error from chrome.runtime.lastError / a missing
+  // response.
+  function sendBg(msg){
     return new Promise((resolve) => {
-      chrome.runtime.sendMessage(
-        { type: 'MAX_EXPORT_DOWNLOAD_URL', url, filename },
-        (resp) => {
-          const err = chrome.runtime.lastError;
-          if (err) resolve({ ok: false, error: err.message });
-          else resolve(resp || { ok: false, error: 'нет ответа от фоновой службы' });
-        }
-      );
+      chrome.runtime.sendMessage(msg, (resp) => {
+        const err = chrome.runtime.lastError;
+        if (err) resolve({ ok: false, error: err.message });
+        else resolve(resp || { ok: false, error: 'нет ответа от фоновой службы (перезагрузите расширение)' });
+      });
     });
   }
 
@@ -963,12 +945,12 @@
       if (!blob.size) throw new Error('пустой ответ');
       const ext = extFromContentType(mime) || extensionFromUrl(urlOrig);
       const filename = `${filenameNoExt}.${ext}`;
-      const r = await downloadFile(await blobToBase64(blob), filename, mime || 'application/octet-stream', true);
+      const r = await sendBg({ type: 'MAX_EXPORT_DOWNLOAD', content: await blobToBase64(blob), filename, mime: mime || 'application/octet-stream', base64: true });
       if (!r || !r.ok) throw new Error((r && r.error) || 'не сохранено');
       return { filename, bytes: blob.size };
     } catch (e) {
       const filename = `${filenameNoExt}.${extensionFromUrl(urlOrig)}`;
-      const r = await downloadUrl(urlOrig, filename);
+      const r = await sendBg({ type: 'MAX_EXPORT_DOWNLOAD_URL', url: urlOrig, filename });
       if (r && r.ok) return { filename, bytes: 0 };
       return { filename: null, error: ((r && r.error) || e.message || String(e)) };
     }
@@ -1015,6 +997,7 @@
     // Keep scrolling/clicking to the bottom until the newest messages are loaded
     // (DOM count stops growing AND the unread jump button is gone).
     for (let i = 0; i < 80; i++) {
+      if (SHOULD_STOP) break;
       const btn = findJumpToLatestButton();
       if (btn) { try { btn.click(); } catch(e){} }
       scrollChat('bottom');
@@ -1218,7 +1201,14 @@
   // retained DOM grows past sessionItemLimit; accumulated rows live in
   // IndexedDB and survive the reloads.
   async function doExportSession(params, st) {
-    const { maxScrolls, startDate, endDate, startDateSet, endDateSet } = params;
+    const { maxScrolls } = params;
+
+    // Honor a Stop pressed while the page was still waiting for the chat to
+    // load: finish with whatever previous sessions collected.
+    if (SHOULD_STOP) {
+      await finishExport(params);
+      return;
+    }
 
     if(!validateRequiredElements()){
       setProgress('Ошибка: не найдены элементы чата на странице');
@@ -1227,16 +1217,14 @@
       return;
     }
 
-    SHOULD_STOP = false;
     _collectMedia = !!params.downloadPhotos;
     // Suppress "You copied the link to the post" snackbars for the whole session.
     hideToasts();
 
-    const parsedStartDate = parseInputDate(startDate);
-    const parsedEndDate = parseInputDate(endDate);
-    _startMs = parsedStartDate ? parsedStartDate.getTime() : 0;
-    _endMs = parsedEndDate ? parsedEndDate.getTime() + 86400000 : Infinity;
-    _useDateRange = !!(startDateSet && parsedStartDate) || !!(endDateSet && parsedEndDate);
+    const range = resolveDateRange(params);
+    _startMs = range.startMs;
+    _endMs = range.endMs;
+    _useDateRange = range.use;
 
     _records = [];
     _seenKeys = new Set();
@@ -1345,35 +1333,37 @@
 
   // Build and download the final report from all accumulated session rows.
   async function finishExport(params) {
-    const { format, paginationEnabled, paginationRows, startDate, endDate, startDateSet, endDateSet, downloadPhotos } = params;
+    const { format, paginationEnabled, paginationRows, downloadPhotos } = params;
 
     let rows = [];
     try { rows = await idbGetAll(); } catch(e) {}
+    // Cross-session dedup: the same post captured with a link in one session
+    // and without it in another is stored under two keys (link vs 'i:'+idKey)
+    // — drop the linkless duplicate.
+    const linkedIdKeys = new Set(rows.filter(r => r.link && r.idKey).map(r => r.idKey));
+    rows = rows.filter(r => r.link || !linkedIdKeys.has(r.idKey));
     try { await idbClear(); } catch(e) {}
     try { sessionStorage.removeItem(SESSION_KEY); } catch(e) {}
 
-    const parsedStartDate = parseInputDate(startDate);
-    const parsedEndDate = parseInputDate(endDate);
-    const startMs = parsedStartDate ? parsedStartDate.getTime() : 0;
-    const endMs = parsedEndDate ? parsedEndDate.getTime() + 86400000 : Infinity;
-    const useDateRange = !!(startDateSet && parsedStartDate) || !!(endDateSet && parsedEndDate);
+    const range = resolveDateRange(params);
 
     // Resolve the channel slug: prefer the slug embedded in captured links.
-    const slug = await findChannelSlug();
+    const slug = findChannelSlug();
 
     let results = rows;
-    if (useDateRange) {
-      results = results.filter(m => m.time >= startMs && m.time <= endMs);
+    if (range.use) {
+      results = results.filter(m => m.time >= range.startMs && m.time <= range.endMs);
     }
     results.sort((a, b) => a.time - b.time);
 
     let photoNumber = 0;
     const photoJobs = [];
+    const missingPhotoMessages = results.filter(m => m.expectedPhoto && !(m.mediaUrls || []).length).length;
     const out = results.map((m, rowIndex) => {
       // Media URLs are only collected while downloadPhotos was enabled; rows
       // from older runs (or text-only posts) simply carry an empty list.
       const urls = downloadPhotos ? [...new Set(m.mediaUrls || [])] : [];
-      const jobs = urls.map((url, index) => {
+      urls.forEach((url, index) => {
         photoNumber++;
         const datePart = m.time ? `${new Date(m.time).getFullYear()}-${pad(new Date(m.time).getMonth() + 1)}-${pad(new Date(m.time).getDate())}` : 'unknown-date';
         photoJobs.push({
@@ -1386,9 +1376,7 @@
         datetime: m.time ? formatTime(m.time) : '',
         post_link: m.link || '',
         text: m.text,
-        media_files: [],
-        media_urls: urls,
-        expected_photo: !!m.expectedPhoto,
+        media_files: [], // filled in below from the download results
         views: m.views || '',
         reactions_total: m.reactions || ''
       };
@@ -1396,13 +1384,12 @@
 
     try {
       if (out.length === 0) {
-        setProgress('Нет сообщений за выбранный период.');
+        setProgress(SHOULD_STOP ? 'Остановлено: нет собранных сообщений.' : 'Нет сообщений за выбранный период.');
         return;
       }
       const now = new Date();
       const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
       const exportFolder = `MAX_Export_${slug}_${ts}`;
-      const missingPhotoMessages = out.filter(row => row.expected_photo && !(row.media_urls || []).length).length;
       const chunkSize = (paginationEnabled && paginationRows > 0) ? paginationRows : out.length;
       const totalParts = Math.ceil(out.length / chunkSize);
 
@@ -1450,7 +1437,7 @@
           : `${exportFolder}/max_${slug}_${ts}${suffix}.csv`;
         const mime = format === 'json' ? 'application/json' : 'text/csv;charset=utf-8;';
 
-        const resp = await downloadFile(content, filename, mime);
+        const resp = await sendBg({ type: 'MAX_EXPORT_DOWNLOAD', content, filename, mime });
         if (!resp || !resp.ok) {
           const detail = (resp && resp.error) || 'неизвестная ошибка';
           downloadErrors.push(`Файл ${part + 1}: ${detail}`);
@@ -1461,9 +1448,11 @@
         setProgress(`Ошибки скачивания:\n${downloadErrors.join('\n')}`);
       } else {
         const partInfo = totalParts > 1 ? ` в ${totalParts} файлах (${chunkSize} строк/файл)` : '';
-        const sizeInfo = photoBytes ? `, ${(photoBytes / 1048576).toFixed(1)} МБ` : '';
-        const photoInfo = downloadPhotos ? `
-Фото (оригиналы): ${photosSaved}, не найдено у сообщений: ${missingPhotoMessages}${sizeInfo}` : '';
+        const sizeInfo = photoBytes ? `, объём: ${(photoBytes / 1048576).toFixed(1)} МБ` : '';
+        // The 340px panel fits ~52 chars of 11px monospace, so each metric gets
+        // its own line; one long line wrapped mid-phrase after "не получилось скачать:".
+        const failInfo = missingPhotoMessages > 0 ? `\nНе получилось скачать: ${missingPhotoMessages}` : '';
+        const photoInfo = downloadPhotos ? `\nФото (оригиналы): ${photosSaved}${sizeInfo}${failInfo}` : '';
         setProgress(`Готово.
 ${format.toUpperCase()}: ${out.length} сообщений${partInfo}${photoInfo}
 Файлы сохранены в папке по умолчанию.`);

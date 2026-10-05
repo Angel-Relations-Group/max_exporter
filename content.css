@@ -9,7 +9,9 @@
   border-radius:14px;
   box-shadow:0 10px 30px rgba(0,0,0,0.25);
   font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
-  width:300px;
+  /* 340px: fits ~52 monospace chars, so pagination lines like
+     "CSV: 12345 сообщений в 12 файлах (5000 строк/файл)" don't wrap. */
+  width:340px;
 }
 #max-exporter-panel button{
   width:100%;

@@ -12,28 +12,30 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
 
+  // Download via chrome.downloads and sendResponse exactly once, when the
+  // download completes, is interrupted or times out (safety net so the
+  // response channel never hangs).
+  const watchDownload = (filename, url, timeoutMs) => {
+    chrome.downloads.download({ url, filename, saveAs: false, conflictAction: 'uniquify' })
+      .then(id => {
+        const onDone = (state) => {
+          chrome.downloads.onChanged.removeListener(onChange);
+          clearTimeout(timer);
+          sendResponse({ ok: state === 'complete', id, state });
+        };
+        const onChange = (delta) => {
+          if (delta.id !== id || !delta.state) return;
+          const state = delta.state.current;
+          if (state === 'complete' || state === 'interrupted') onDone(state);
+        };
+        const timer = setTimeout(() => onDone('timeout'), timeoutMs);
+        chrome.downloads.onChanged.addListener(onChange);
+      })
+      .catch(err => sendResponse({ ok: false, error: (err && err.message) || String(err) }));
+  };
+
   if (msg.type === 'MAX_EXPORT_DOWNLOAD_URL') {
-    chrome.downloads.download({
-      url: msg.url,
-      filename: msg.filename,
-      saveAs: false,
-      conflictAction: 'uniquify'
-    }).then(id => {
-      const onDone = (state) => {
-        chrome.downloads.onChanged.removeListener(onChange);
-        clearTimeout(timer);
-        sendResponse({ ok: state === 'complete', id, state });
-      };
-      const onChange = (delta) => {
-        if (delta.id !== id || !delta.state) return;
-        const state = delta.state.current;
-        if (state === 'complete' || state === 'interrupted') onDone(state);
-      };
-      const timer = setTimeout(() => onDone('timeout'), 60000);
-      chrome.downloads.onChanged.addListener(onChange);
-    }).catch(err => {
-      sendResponse({ ok: false, error: (err && err.message) || String(err) });
-    });
+    watchDownload(msg.filename, msg.url, 60000);
     return true;
   }
 
@@ -58,24 +60,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
 
-  chrome.downloads.download({ url, filename: msg.filename, saveAs: false, conflictAction: 'uniquify' })
-    .then(id => {
-      const onDone = (state) => {
-        chrome.downloads.onChanged.removeListener(onChange);
-        clearTimeout(timer);
-        sendResponse({ ok: state === 'complete', id, state });
-      };
-      const onChange = (delta) => {
-        if (delta.id !== id || !delta.state) return;
-        const s = delta.state.current;
-        if (s === 'complete' || s === 'interrupted') onDone(s);
-      };
-      const timer = setTimeout(() => onDone('timeout'), msg.base64 ? 120000 : 30000); // safety net for the response channel
-      chrome.downloads.onChanged.addListener(onChange);
-    })
-    .catch(err => {
-      sendResponse({ ok: false, error: (err && err.message) || String(err) });
-    });
-
+  watchDownload(msg.filename, url, msg.base64 ? 120000 : 30000);
   return true; // response will arrive asynchronously
 });

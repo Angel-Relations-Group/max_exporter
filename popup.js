@@ -41,7 +41,7 @@ async function sendToTab(msg){
 }
 
 qs('#paginationEnabled').addEventListener('change', function(){
-  qs('#paginationFields').style.display = this.checked ? 'block' : 'none';
+  qs('#paginationFields').hidden = !this.checked;
 });
 
 qs('#run').addEventListener('click', async ()=>{
@@ -57,8 +57,8 @@ qs('#run').addEventListener('click', async ()=>{
       return;
     }
 
-    qs('#run').style.display='none';
-    qs('#stop').style.display='block';
+    qs('#run').hidden = true;
+    qs('#stop').hidden = false;
     setStatus('Запуск...');
     const resp = await sendToTab({
       type:'MAX_EXPORT_START',
@@ -66,23 +66,21 @@ qs('#run').addEventListener('click', async ()=>{
       format: qs('#format').value,
       startDate: qs('#startDate').value || null,
       endDate: qs('#endDate').value || null,
-      startDateSet: qs('#startDate').value !== '',
-      endDateSet: qs('#endDate').value !== '',
       downloadPhotos: qs('#downloadPhotos').checked,
       paginationEnabled: qs('#paginationEnabled').checked,
       paginationRows: parseInt(qs('#paginationRows').value || '350', 10)
     });
     if(!resp?.ok){
       setStatus('Не удалось запустить: ' + (resp?.error || 'unknown'));
-      qs('#run').style.display='block';
-      qs('#stop').style.display='none';
+      qs('#run').hidden = false;
+      qs('#stop').hidden = true;
     } else {
       setStatus('Запущено. Прогресс виден на странице.');
     }
   }catch(e){
     setStatus('Ошибка: ' + e.message);
-    qs('#run').style.display='block';
-    qs('#stop').style.display='none';
+    qs('#run').hidden = false;
+    qs('#stop').hidden = true;
   }
 });
 
@@ -93,7 +91,7 @@ qs('#stop').addEventListener('click', async ()=>{
   }catch(e){
     setStatus('Ошибка: ' + e.message);
   } finally {
-    qs('#run').style.display='block';
-    qs('#stop').style.display='none';
+    qs('#run').hidden = false;
+    qs('#stop').hidden = true;
   }
 });

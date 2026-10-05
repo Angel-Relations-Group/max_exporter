@@ -73,13 +73,8 @@ async function copySharedFiles(dest) {
   }
 }
 
-// Chrome manifest = the source manifest.json unchanged.
-function makeChromeManifest(base) {
-  return base;
-}
-
-  // Firefox manifest: add the gecko-specific settings Firefox requires for signing.
-  function makeFirefoxManifest(base) {
+// Firefox manifest: add the gecko-specific settings Firefox requires for signing.
+function makeFirefoxManifest(base) {
   const m = structuredClone(base);
   m.background = { scripts: ['background.js'] };
   // `license` is recognized by Firefox/AMO but not by Chrome (which warns
@@ -134,7 +129,8 @@ async function main() {
   await rmrf(DIST);
   await fs.mkdir(DIST, { recursive: true });
 
-  await buildTarget('chrome', makeChromeManifest(baseManifest));
+  // Chrome build ships the source manifest.json unchanged.
+  await buildTarget('chrome', baseManifest);
   await buildTarget('firefox', makeFirefoxManifest(baseManifest));
 
   console.log('\nNext: zip each folder (CI) or load dist/<browser> unpacked locally.');
